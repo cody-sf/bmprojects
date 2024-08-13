@@ -1,0 +1,566 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		014634B429D2057B461FB8A1 /* Pods_Umbrella.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C326127219B32A131E18E2B7 /* Pods_Umbrella.framework */; };
+		13FCFDB6E2ED262397B56CBF /* Pods_Umbrella_Watch_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8D246B0C41EE79F229F74202 /* Pods_Umbrella_Watch_App.framework */; };
+		154DF37C2B746DB8008EAC54 /* Umbrella Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 154DF37B2B746DB8008EAC54 /* Umbrella Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		154DF3812B746DB8008EAC54 /* UmbrellaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 154DF3802B746DB8008EAC54 /* UmbrellaApp.swift */; };
+		154DF3832B746DB8008EAC54 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 154DF3822B746DB8008EAC54 /* ContentView.swift */; };
+		154DF3852B746DBA008EAC54 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 154DF3842B746DBA008EAC54 /* Assets.xcassets */; };
+		154DF3882B746DBA008EAC54 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 154DF3872B746DBA008EAC54 /* Preview Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		154DF37D2B746DB8008EAC54 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 154DF36F2B746DB8008EAC54 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 154DF37A2B746DB8008EAC54;
+			remoteInfo = "Umbrella Watch App";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		154DF38E2B746DBA008EAC54 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				154DF37C2B746DB8008EAC54 /* Umbrella Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		154DF3752B746DB8008EAC54 /* Umbrella.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Umbrella.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		154DF37B2B746DB8008EAC54 /* Umbrella Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Umbrella Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		154DF3802B746DB8008EAC54 /* UmbrellaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UmbrellaApp.swift; sourceTree = "<group>"; };
+		154DF3822B746DB8008EAC54 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		154DF3842B746DBA008EAC54 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		154DF3872B746DBA008EAC54 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		34596D02ABF77B4FF46FF705 /* Pods-Umbrella Watch App.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Umbrella Watch App.release.xcconfig"; path = "Target Support Files/Pods-Umbrella Watch App/Pods-Umbrella Watch App.release.xcconfig"; sourceTree = "<group>"; };
+		8D246B0C41EE79F229F74202 /* Pods_Umbrella_Watch_App.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Umbrella_Watch_App.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		A45DE87DE2E85BF9A4C7B29F /* Pods-Umbrella.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Umbrella.release.xcconfig"; path = "Target Support Files/Pods-Umbrella/Pods-Umbrella.release.xcconfig"; sourceTree = "<group>"; };
+		AB29A88AB7C9A445EF87F12E /* Pods-Umbrella Watch App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Umbrella Watch App.debug.xcconfig"; path = "Target Support Files/Pods-Umbrella Watch App/Pods-Umbrella Watch App.debug.xcconfig"; sourceTree = "<group>"; };
+		B7A72B124731FB77980E8E36 /* Pods-Umbrella.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Umbrella.debug.xcconfig"; path = "Target Support Files/Pods-Umbrella/Pods-Umbrella.debug.xcconfig"; sourceTree = "<group>"; };
+		C326127219B32A131E18E2B7 /* Pods_Umbrella.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Umbrella.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		154DF3782B746DB8008EAC54 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				13FCFDB6E2ED262397B56CBF /* Pods_Umbrella_Watch_App.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		35740F862B5111623AC7F4D4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				014634B429D2057B461FB8A1 /* Pods_Umbrella.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		154DF36E2B746DB8008EAC54 = {
+			isa = PBXGroup;
+			children = (
+				154DF37F2B746DB8008EAC54 /* Umbrella Watch App */,
+				154DF3762B746DB8008EAC54 /* Products */,
+				D54F9C26B10C048DBE27D321 /* Pods */,
+				38EE3867DEFAB53A8680487D /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
+		154DF3762B746DB8008EAC54 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				154DF3752B746DB8008EAC54 /* Umbrella.app */,
+				154DF37B2B746DB8008EAC54 /* Umbrella Watch App.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		154DF37F2B746DB8008EAC54 /* Umbrella Watch App */ = {
+			isa = PBXGroup;
+			children = (
+				154DF3802B746DB8008EAC54 /* UmbrellaApp.swift */,
+				154DF3822B746DB8008EAC54 /* ContentView.swift */,
+				154DF3842B746DBA008EAC54 /* Assets.xcassets */,
+				154DF3862B746DBA008EAC54 /* Preview Content */,
+			);
+			path = "Umbrella Watch App";
+			sourceTree = "<group>";
+		};
+		154DF3862B746DBA008EAC54 /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				154DF3872B746DBA008EAC54 /* Preview Assets.xcassets */,
+			);
+			path = "Preview Content";
+			sourceTree = "<group>";
+		};
+		38EE3867DEFAB53A8680487D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				C326127219B32A131E18E2B7 /* Pods_Umbrella.framework */,
+				8D246B0C41EE79F229F74202 /* Pods_Umbrella_Watch_App.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		D54F9C26B10C048DBE27D321 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				B7A72B124731FB77980E8E36 /* Pods-Umbrella.debug.xcconfig */,
+				A45DE87DE2E85BF9A4C7B29F /* Pods-Umbrella.release.xcconfig */,
+				AB29A88AB7C9A445EF87F12E /* Pods-Umbrella Watch App.debug.xcconfig */,
+				34596D02ABF77B4FF46FF705 /* Pods-Umbrella Watch App.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		154DF3742B746DB8008EAC54 /* Umbrella */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 154DF38F2B746DBA008EAC54 /* Build configuration list for PBXNativeTarget "Umbrella" */;
+			buildPhases = (
+				314DA9B83636EA1B8ABB77B8 /* [CP] Check Pods Manifest.lock */,
+				154DF3732B746DB8008EAC54 /* Resources */,
+				154DF38E2B746DBA008EAC54 /* Embed Watch Content */,
+				35740F862B5111623AC7F4D4 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				154DF37E2B746DB8008EAC54 /* PBXTargetDependency */,
+			);
+			name = Umbrella;
+			productName = Umbrella;
+			productReference = 154DF3752B746DB8008EAC54 /* Umbrella.app */;
+			productType = "com.apple.product-type.application.watchapp2-container";
+		};
+		154DF37A2B746DB8008EAC54 /* Umbrella Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 154DF38B2B746DBA008EAC54 /* Build configuration list for PBXNativeTarget "Umbrella Watch App" */;
+			buildPhases = (
+				9970E2A0E69CCC4442B1BC4D /* [CP] Check Pods Manifest.lock */,
+				154DF3772B746DB8008EAC54 /* Sources */,
+				154DF3782B746DB8008EAC54 /* Frameworks */,
+				154DF3792B746DB8008EAC54 /* Resources */,
+				9F98B033ABB94B61A9FCAFB9 /* [CP] Embed Pods Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Umbrella Watch App";
+			productName = "Umbrella Watch App";
+			productReference = 154DF37B2B746DB8008EAC54 /* Umbrella Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		154DF36F2B746DB8008EAC54 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1520;
+				LastUpgradeCheck = 1520;
+				TargetAttributes = {
+					154DF3742B746DB8008EAC54 = {
+						CreatedOnToolsVersion = 15.2;
+					};
+					154DF37A2B746DB8008EAC54 = {
+						CreatedOnToolsVersion = 15.2;
+					};
+				};
+			};
+			buildConfigurationList = 154DF3722B746DB8008EAC54 /* Build configuration list for PBXProject "Umbrella" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 154DF36E2B746DB8008EAC54;
+			productRefGroup = 154DF3762B746DB8008EAC54 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				154DF3742B746DB8008EAC54 /* Umbrella */,
+				154DF37A2B746DB8008EAC54 /* Umbrella Watch App */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		154DF3732B746DB8008EAC54 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		154DF3792B746DB8008EAC54 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				154DF3882B746DBA008EAC54 /* Preview Assets.xcassets in Resources */,
+				154DF3852B746DBA008EAC54 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		314DA9B83636EA1B8ABB77B8 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-Umbrella-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		9970E2A0E69CCC4442B1BC4D /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-Umbrella Watch App-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		9F98B033ABB94B61A9FCAFB9 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Umbrella Watch App/Pods-Umbrella Watch App-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Umbrella Watch App/Pods-Umbrella Watch App-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Umbrella Watch App/Pods-Umbrella Watch App-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		154DF3772B746DB8008EAC54 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				154DF3832B746DB8008EAC54 /* ContentView.swift in Sources */,
+				154DF3812B746DB8008EAC54 /* UmbrellaApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		154DF37E2B746DB8008EAC54 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 154DF37A2B746DB8008EAC54 /* Umbrella Watch App */;
+			targetProxy = 154DF37D2B746DB8008EAC54 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		154DF3892B746DBA008EAC54 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "Connect to Umbrella";
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		154DF38A2B746DBA008EAC54 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "Connecs to Umbrella";
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		154DF38C2B746DBA008EAC54 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = AB29A88AB7C9A445EF87F12E /* Pods-Umbrella Watch App.debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"Umbrella Watch App/Preview Content\"";
+				DEVELOPMENT_TEAM = M37SRJ3YDP;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Umbrella;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKWatchOnly = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cody.Umbrella.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.2;
+			};
+			name = Debug;
+		};
+		154DF38D2B746DBA008EAC54 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 34596D02ABF77B4FF46FF705 /* Pods-Umbrella Watch App.release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"Umbrella Watch App/Preview Content\"";
+				DEVELOPMENT_TEAM = M37SRJ3YDP;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Umbrella;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKWatchOnly = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cody.Umbrella.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 10.2;
+			};
+			name = Release;
+		};
+		154DF3902B746DBA008EAC54 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B7A72B124731FB77980E8E36 /* Pods-Umbrella.debug.xcconfig */;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M37SRJ3YDP;
+				INFOPLIST_KEY_CFBundleDisplayName = Umbrella;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cody.Umbrella;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		154DF3912B746DBA008EAC54 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A45DE87DE2E85BF9A4C7B29F /* Pods-Umbrella.release.xcconfig */;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M37SRJ3YDP;
+				INFOPLIST_KEY_CFBundleDisplayName = Umbrella;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cody.Umbrella;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		154DF3722B746DB8008EAC54 /* Build configuration list for PBXProject "Umbrella" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				154DF3892B746DBA008EAC54 /* Debug */,
+				154DF38A2B746DBA008EAC54 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		154DF38B2B746DBA008EAC54 /* Build configuration list for PBXNativeTarget "Umbrella Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				154DF38C2B746DBA008EAC54 /* Debug */,
+				154DF38D2B746DBA008EAC54 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		154DF38F2B746DBA008EAC54 /* Build configuration list for PBXNativeTarget "Umbrella" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				154DF3902B746DBA008EAC54 /* Debug */,
+				154DF3912B746DBA008EAC54 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 154DF36F2B746DB8008EAC54 /* Project object */;
+}
