@@ -23,9 +23,12 @@ BLEService fpService(SERVICE_UUID);
 BLECharacteristic featuresCharacteristic(FEATURES_UUID, BLERead | BLEWrite, 512);
 
 #define LED_OUTPUT_PIN 27
-#define NUM_LEDS 20
+#define NUM_LEDS 30
 #define COLOR_ORDER GRB
-static Device fannypack;
+
+// Fannypack = Pink
+// Fannypack2 = Rebago bag
+static Device fannypack2;
 
 // LED Strips/Lightshow
 CRGB leds[NUM_LEDS];
@@ -45,8 +48,8 @@ bool reverseStrip = true;
 bool power = true;
 AvailablePalettes AP_palette = cool;
 
-// Sync Controller
-SyncController syncController(light_show, CURRENT_USER, fannypack);
+// Sync Controller - Change this with fannypack type
+SyncController syncController(light_show, CURRENT_USER, fannypack2);
 
 std::string toLowerCase(const std::string &input)
 {
@@ -78,8 +81,8 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       std::string strValue = toLowerCase(value.substr(1));
       AP_palette = stringToPalette(strValue.c_str());
       Serial.print(strValue.c_str());
-      primaryPalette = light_show.getPrimarySecondaryPalettes().first;
       syncController.setPalette(AP_palette);
+      primaryPalette = light_show.getPrimarySecondaryPalettes().first;
       return;
     }
 
@@ -87,10 +90,9 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     if (feature == 0x05)
     {
       reverseStrip = value[1] != 0;
-      light_show.palette_stream(speed, AP_palette, reverseStrip);
       Serial.print("Received direction: ");
       Serial.println(reverseStrip ? "True" : "False");
-      //syncController.setDirection(reverseStrip);
+      syncController.setDirection(reverseStrip);
       return;
     }
 
@@ -132,14 +134,14 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
 void setup()
 {
   Serial.begin(115200);
-
+  delay(1000);
   if (!BLE.begin())
   {
     Serial.println("starting Bluetooth® Low Energy module failed!");
     while (1)
       ;
   }
-  BLE.setLocalName("Fannypack-CL");
+  BLE.setLocalName("Fannypack-AY");
   BLE.setAdvertisedService(fpService);
   fpService.addCharacteristic(featuresCharacteristic);
   BLE.addService(fpService);

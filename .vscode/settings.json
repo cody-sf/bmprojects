@@ -73,7 +73,9 @@
     "variant": "cpp",
     "vector": "cpp",
     "algorithm": "cpp",
-    "*.ipp": "cpp"
+    "*.ipp": "cpp",
+    "cfenv": "cpp",
+    "execution": "cpp"
   },
   "files.autoSave": "off",
   "eslint.format.enable": true

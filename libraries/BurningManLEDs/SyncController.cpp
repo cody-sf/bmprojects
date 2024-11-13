@@ -14,8 +14,10 @@ bool initialized = false;
 SyncController::SyncController(LightShow &light_show, const std::string &userIdentifier, Device &deviceType) : light_show_(light_show),
                                                                                                                brightness_(DEFAULT_BRIGHTNESS),
                                                                                                                shouldSync_(true),
-                                                                                                               currentSetting_(PALETTE)
-
+                                                                                                               currentSetting_(PALETTE),
+                                                                                                               origin_(Position(DEFAULT_ORIGIN_LATITUDE, DEFAULT_ORIGIN_LONGITUDE)),
+                                                                                                               radius_inner_(DEFAULT_PLAYA_INNER_RADIUS),
+                                                                                                               radius_outer_(DEFAULT_PLAYA_OUTER_RADIUS)
 {
     instance_ = this;
     std::string deviceName = getDeviceName(deviceType);
@@ -23,6 +25,7 @@ SyncController::SyncController(LightShow &light_show, const std::string &userIde
     // Set the MAC address based on the provided user identifier and device type
     if (deviceMap.find(key) != deviceMap.end())
     {
+        Serial.println("Device found. Using MAC address.");
         memcpy(broadcastAddress, deviceMap[key].mac, 6);
     }
     else
@@ -102,11 +105,11 @@ void SyncController::sendUpdate(const SyncData *data)
             esp_err_t result = esp_now_send(pair.second.mac, (uint8_t *)data, sizeof(SyncData));
             if (result == ESP_OK)
             {
-                Serial.println("Data sent successfully to peer");
+                // Serial.println("Data sent successfully to peer");
             }
             else
             {
-                Serial.println("Error sending data to peer");
+                // Serial.println("Error sending data to peer");
             }
         }
     }
@@ -137,17 +140,6 @@ void SyncController::onDataReceived(const esp_now_recv_info_t *info, const uint8
             switch (receivedData.messageType)
             {
             case SET_LIGHT_SCENE:
-                Serial.println("Received SET_LIGHT_SCENE: ");
-
-                Serial.print("Received Scene ID: ");
-                Serial.println(receivedData.scene.scene_id);
-
-                Serial.print("Received Palette: ");
-                Serial.println(receivedData.scene.primary_palette);
-
-                Serial.print("Rceived speed: ");
-                Serial.println(receivedData.scene.speed);
-
                 Serial.print("Received Brightness: ");
                 Serial.println(receivedData.scene.brightness);
 
@@ -160,17 +152,17 @@ void SyncController::onDataReceived(const esp_now_recv_info_t *info, const uint8
 
 void SyncController::setCurrentDeviceScene(LightScene scene)
 {
-    Serial.println("Setting current device scene");
     light_show_.apply_sync_updates(scene);
 }
 
 void SyncController::setBrightness(uint8_t brightness)
 {
-    light_show_.brightness(brightness);
     SyncData syncData;
-    strncpy(syncData.identifier, CURRENT_USER, 2);
+    syncData.scene = light_show_.getCurrentScene();
+    if (sync)
+        strncpy(syncData.identifier, CURRENT_USER, 2);
     syncData.messageType = SET_LIGHT_SCENE;
-    syncData.scene.brightness = map(brightness, 1, 100, 0, 255);
+    syncData.scene.brightness = brightness;
     Serial.print("Local Command - Set Brightness: ");
     Serial.println(syncData.scene.brightness);
     this->sendUpdate(&syncData);
@@ -203,7 +195,7 @@ void SyncController::setPalette(AvailablePalettes palette)
     Serial.println(palette);
 
     // Send the update to other devices
-    strncpy(syncData.identifier, "CL", 2);
+    strncpy(syncData.identifier, CURRENT_USER, 2);
     syncData.messageType = SET_LIGHT_SCENE;
     Serial.print("Local Command - Set Palette: ");
     Serial.println(syncData.scene.primary_palette);
@@ -212,37 +204,114 @@ void SyncController::setPalette(AvailablePalettes palette)
     setCurrentDeviceScene(syncData.scene);
 }
 
+void SyncController::positionStatus(LocationService &location_service)
+{
+    Serial.println("Position Status in SyncController");
+    Serial.print("Position Available?: ");
+    Serial.println(location_service.is_current_position_available());
+
+    SyncData syncData;
+    syncData.scene = light_show_.getCurrentScene();
+    syncData.scene.scene_id = solid;
+    syncData.scene.color = location_service.is_current_position_available() ? CRGB::Green : CRGB::Red;
+
+    // Send Update
+    strncpy(syncData.identifier, CURRENT_USER, 2);
+    syncData.messageType = SET_LIGHT_SCENE;
+    Serial.print("Set Position Status: ");
+    Serial.println(location_service.is_current_position_available() ? "Green" : "Red");
+    light_show_.solid(syncData.scene.color);
+    this->sendUpdate(&syncData);
+}
+
+void SyncController::speedometer(LocationService &location_service, CRGB color1, CRGB color2)
+{
+    Serial.println("Starting Speedometer Show");
+    Serial.print("Speed: ");
+    float currentSpeed = location_service.current_speed();
+    Serial.println(currentSpeed);
+
+    SyncData syncData;
+    syncData.scene = light_show_.getCurrentScene();
+    syncData.scene.scene_id = solid;
+    syncData.scene.color = CRGB::Red;
+
+    if (location_service.is_current_position_available())
+    {
+        // Ensure speed is within the defined range
+        float normalizedSpeed = std::min(currentSpeed, static_cast<float>(MAX_SPEED)) / MAX_SPEED;
+        // Interpolate between color1 and color2 based on the normalized speed
+        CRGB new_color = blend(color1, color2, static_cast<uint8_t>(normalizedSpeed * 255));
+        syncData.scene.color = new_color;
+    }
+
+    strncpy(syncData.identifier, CURRENT_USER, 2);
+    syncData.messageType = SET_LIGHT_SCENE;
+    light_show_.solid(syncData.scene.color);
+    this->sendUpdate(&syncData);
+}
+
+void SyncController::colorWheel(LocationService &location_service)
+{
+    Serial.println("Color Wheel in SyncController");
+    SyncData syncData;
+    syncData.scene = light_show_.getCurrentScene();
+    syncData.scene.scene_id = solid;
+    syncData.scene.color = this->getColorWheelColor(location_service);
+
+    // Send Update
+    strncpy(syncData.identifier, CURRENT_USER, 2);
+    syncData.messageType = SET_LIGHT_SCENE;
+    Serial.print("Local Command - Set Color Wheel: ");
+    this->sendUpdate(&syncData);
+    light_show_.solid(syncData.scene.color);
+}
+
+void SyncController::colorRadial(LocationService &location_service, CRGB color1, CRGB color2)
+{
+    Serial.println("Color Radial in SyncController");
+    SyncData syncData;
+    syncData.scene = light_show_.getCurrentScene();
+    syncData.scene.scene_id = solid;
+    syncData.scene.color = this->getRadialColor(location_service, color1, color2);
+
+    // Send Update
+    strncpy(syncData.identifier, CURRENT_USER, 2);
+    syncData.messageType = SET_LIGHT_SCENE;
+    Serial.print("Local Command - Set Color Wheel: ");
+    this->sendUpdate(&syncData);
+    light_show_.solid(syncData.scene.color);
+}
+
+void SyncController::jacketDance(CRGB color)
+{
+    SyncData syncData;
+    syncData.scene = light_show_.getCurrentScene();
+    syncData.scene.scene_id = solid;
+    syncData.scene.color = color;
+
+    // Send Update
+    strncpy(syncData.identifier, CURRENT_USER, 2);
+    syncData.messageType = SET_LIGHT_SCENE;
+    Serial.print("Local Command - Set Jacket Dance: ");
+    this->sendUpdate(&syncData);
+    light_show_.solid(syncData.scene.color);
+}
+
 void SyncController::handleButtonShortPress()
 {
     LightScene currentScene = light_show_.getCurrentScene();
     SyncData syncData;
     AvailablePalettes newPalette;
 
-    Serial.print("Current Setting: ");
-    Serial.println(currentSetting_);
-
-    switch (currentSetting_)
-    {
-    case PALETTE:
-        // Cycle through palettes
-        palette_index_ = (palette_index_ + 1) % light_show_.getPaletteCount();
-        newPalette = static_cast<AvailablePalettes>(palette_index_);
-        syncData.scene = currentScene;
-        syncData.scene.primary_palette = newPalette;
-        break;
-
-    case MODE:
-        // Implement logic to cycle through modes, e.g., spectrum, strobe, etc.
-        // Example:
-        // light_show_.changeMode(NextMode());  // Assuming a method to cycle modes
-        // syncData.messageType = MODE_CHANGE;
-        // syncData.scene.scene_id = light_show_.getCurrentMode();
-        break;
-    }
+    palette_index_ = (palette_index_ + 1) % light_show_.getPaletteCount();
+    newPalette = static_cast<AvailablePalettes>(palette_index_);
+    syncData.scene = currentScene;
+    syncData.scene.primary_palette = newPalette;
 
     setCurrentDeviceScene(syncData.scene);
     // Send the update to other devices
-    strncpy(syncData.identifier, "CL", 2);
+    strncpy(syncData.identifier, CURRENT_USER, 2);
     syncData.currentSetting = currentSetting_;
     syncData.messageType = SET_LIGHT_SCENE;
     this->sendUpdate(&syncData);
@@ -254,37 +323,13 @@ void SyncController::handleButtonLongPress()
     switch (currentSetting_)
     {
     case PALETTE:
-        currentSetting_ = MODE;
-        break;
-    case MODE:
         currentSetting_ = PALETTE;
         break;
     }
 
-    Serial.print("Current Setting: ");
-    switch (currentSetting_)
-    {
-    case PALETTE:
-        Serial.println("Palette");
-        break;
-    case MODE:
-        Serial.println("Mode");
-        break;
-    }
-    // Set the correct MessageType based on currentSetting_
-    MessageType messageType;
-    switch (currentSetting_)
-    {
-    case PALETTE:
-        messageType = PALETTE_CHANGE;
-        break;
-    case MODE:
-        messageType = MODE_CHANGE;
-        break;
-    }
     SyncData syncData;
-    strncpy(syncData.identifier, "CL", 2);
-    syncData.messageType = messageType;
+    strncpy(syncData.identifier, CURRENT_USER, 2);
+    syncData.messageType = SET_LIGHT_SCENE;
     syncData.currentSetting = currentSetting_;
     this->sendUpdate(&syncData);
 }
@@ -297,7 +342,7 @@ void SyncController::handleDialChange(int8_t dialDirection)
     syncData.scene = currentScene;
 
     uint8_t currentBrightness = currentScene.brightness;
-    currentBrightness = constrain(currentBrightness + (dialDirection * 5), 0, 254); // Scale from 1 to 255
+    currentBrightness = constrain(currentBrightness + (dialDirection * 5), 0, 150); // Scale from 1 to 255
 
     Serial.print("Setting current brightness to: ");
     Serial.println(currentBrightness);
@@ -308,13 +353,118 @@ void SyncController::handleDialChange(int8_t dialDirection)
     this->sendUpdate(&syncData);
 }
 
-// void SyncController::setDirection(bool direction)
-// {
-//     light_show_.palette_stream(speed_, AP_palette, direction);
-//     direction_ = direction;
-// }
+void SyncController::changeMode(LightSceneID mode)
+{
+    LightScene currentScene = light_show_.getCurrentScene();
+    SyncData syncData;
+    syncData.scene = currentScene;
+    syncData.scene.scene_id = mode;
+    strncpy(syncData.identifier, CURRENT_USER, 2);
+    syncData.messageType = SET_LIGHT_SCENE;
+    if (mode == color_wheel || mode == position_status)
+    {
+        Serial.println("Changing to solid because detected either color wheel or position status");
+        syncData.scene.scene_id = solid;
+    }
+    else
+    {
+        setCurrentDeviceScene(syncData.scene);
+    }
+
+    this->sendUpdate(&syncData);
+}
+
+void SyncController::setDirection(bool direction)
+{
+    direction_ = direction;
+    SyncData syncData;
+    syncData.scene = light_show_.getCurrentScene();
+    syncData.scene.direction = direction;
+    Serial.print('setting current device direction to: ');
+    Serial.println(direction);
+
+    // Send the update to other devices
+    strncpy(syncData.identifier, CURRENT_USER, 2);
+    syncData.messageType = SET_LIGHT_SCENE;
+
+    this->sendUpdate(&syncData);
+    setCurrentDeviceScene(syncData.scene);
+}
 
 void SyncController::shouldDeviceSync(bool shouldSync)
 {
     shouldSync_ = shouldSync;
+}
+
+CRGB SyncController::getColorWheelColor(LocationService &location_service)
+{
+    if (location_service.is_current_position_available())
+    {
+        Position current_position = location_service.current_position();
+        Position offset = current_position - origin_;
+        uint8_t hue = 255 * offset.polar_angle() / (2 * PI);
+        CRGB new_color = CHSV(hue, 255, 255);
+        float distance = current_position.distance_from(origin_);
+        unsigned int half_radius_inner = radius_inner_ >> 1;
+
+        if (distance < half_radius_inner)
+        {
+            new_color = ORIGIN_COLOR;
+        }
+        else if (distance >= half_radius_inner && distance <= radius_inner_)
+        {
+            uint8_t scale_factor = 255 * (distance - half_radius_inner) / half_radius_inner;
+            new_color = CRGB(ORIGIN_COLOR).lerp8(new_color, scale_factor);
+        }
+        return new_color;
+    }
+    else
+    {
+        // If the position is not available, return red
+        Serial.println("Position not available");
+        return CRGB::Red;
+    }
+}
+
+CRGB SyncController::getRadialColor(LocationService &location_service, CRGB color1, CRGB color2)
+{
+    if (location_service.is_current_position_available())
+    {
+        Position current_position = location_service.current_position();
+        float distance = current_position.distance_from(origin_);
+        CRGB new_color = color1;
+
+        if (distance <= radius_inner_)
+        {
+            // Blend from color1 to color2 within the inner radius
+            uint8_t blend_factor = 255 * (distance / radius_inner_);
+            new_color = color1.lerp8(color2, blend_factor);
+        }
+        else if (distance > radius_inner_ && distance <= radius_outer_)
+        {
+            // Blend from color2 to black (or any other color if needed) in the outer ring
+            uint8_t blend_factor = 255 * ((distance - radius_inner_) / (radius_outer_ - radius_inner_));
+            new_color = color2.lerp8(CRGB::Black, blend_factor);
+        }
+
+        return new_color;
+    }
+
+    // Default color if the position is not available
+    return color1;
+}
+
+void SyncController::setOrigin(const Position &origin)
+{
+    origin_ = origin;
+}
+
+void SyncController::setRadiusInner(unsigned int radius_inner)
+{
+    radius_inner_ = radius_inner;
+}
+
+void SyncController::setRadiusOuter(unsigned int radius_outer)
+{
+    radius_outer_ = radius_outer;
 }

@@ -5,5 +5,7 @@
 #include "LightShow.h"
 
 AvailablePalettes stringToPalette(const char *str);
+const char *paletteToString(AvailablePalettes palette);
+CRGB hexToCRGB(const String &hexString);
 
 #endif // HELPERS_H

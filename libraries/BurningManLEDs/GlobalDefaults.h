@@ -6,7 +6,9 @@
 #define MULTICAST_LISTENING_PORT 8888
 #define DEFAULT_BRIGHTNESS 80
 
-#define CURRENT_USER "CL"
+#define CURRENT_USER "AC"
+
+#define DEFAULT_BT_REFRESH_INTERVAL 5000
 
 struct DeviceInfo
 {

@@ -494,4 +494,126 @@ DEFINE_GRADIENT_PALETTE(garish14_gp){
     212, 194, 149, 197,
     255, 194, 149, 197};
 
+// Codys Gradients
+DEFINE_GRADIENT_PALETTE(candy_palette){
+    0, 255, 166, 26,   // Orange
+    63, 50, 26, 255,   // Blue-Violet
+    127, 255, 26, 221, // Pink
+    191, 26, 52, 255,  // Blue
+    252, 255, 166, 26  // Orange
+};
+CRGBPalette16 candyPalette = candy_palette;
+
+DEFINE_GRADIENT_PALETTE(electric_blossom_palette){
+    0, 255, 26, 248,   // Pink
+    25, 42, 255, 19,   // Green
+    51, 255, 26, 248,  // Pink
+    76, 42, 255, 19,   // Green
+    102, 255, 26, 248, // Pink
+    127, 42, 255, 19,  // Green
+    153, 255, 26, 248, // Pink
+    178, 42, 255, 19,  // Green
+    204, 255, 26, 248, // Pink
+    229, 42, 255, 19,  // Green
+    255, 255, 26, 248  // Pink
+};
+CRGBPalette16 eblossomPalette = electric_blossom_palette;
+
+DEFINE_GRADIENT_PALETTE(sunset_fusion_palette){
+    0, 255, 26, 248,   // Pink
+    63, 255, 208, 26,  // Yellow
+    127, 255, 26, 248, // Pink
+    191, 255, 208, 26, // Yellow
+    255, 255, 26, 248  // Pink
+};
+CRGBPalette16 sunsetFusionPalette = sunset_fusion_palette;
+
+DEFINE_GRADIENT_PALETTE(cosmic_waves_palette){
+    0, 255, 26, 248,   // Pink
+    54, 50, 26, 255,   // Blue-Violet
+    127, 26, 255, 177, // Aqua
+    206, 26, 52, 255,  // Blue
+    255, 255, 26, 248  // Pink
+};
+CRGBPalette16 cosmicWavesPalette = cosmic_waves_palette;
+
+DEFINE_GRADIENT_PALETTE(nebula_palette){
+    0, 105, 0, 193,   // Deep Purple
+    25, 9, 15, 121,   // Dark Blue
+    51, 123, 8, 137,  // Magenta
+    76, 37, 49, 153,  // Indigo
+    102, 162, 34, 88, // Deep Pink
+    255, 0, 245, 255  // Cyan
+};
+
+CRGBPalette16 nebulaPalette = nebula_palette;
+
+DEFINE_GRADIENT_PALETTE(oasis_palette){
+    0, 16, 91, 19,    // Deep Green
+    51, 29, 237, 253, // Aqua
+    255, 167, 69, 252 // Purple
+};
+CRGBPalette16 oasisPalette = oasis_palette;
+
+DEFINE_GRADIENT_PALETTE(vivid_palette){
+    0, 157, 247, 36,  // Lime Green
+    51, 134, 29, 253, // Purple
+    76, 253, 34, 34,  // Red
+    255, 167, 69, 252 // Violet
+};
+CRGBPalette16 vividPalette = vivid_palette;
+
+DEFINE_GRADIENT_PALETTE(wave_palette){
+    0, 0, 174, 196,   // Teal
+    25, 255, 0, 254,  // Magenta
+    66, 0, 45, 177,   // Blue
+    76, 219, 20, 20,  // Red
+    84, 0, 22, 255,   // Blue
+    97, 0, 224, 255,  // Cyan
+    104, 255, 0, 254, // Magenta
+    122, 6, 7, 245,   // Indigo
+    211, 2, 57, 252,  // Bright Blue
+    255, 0, 245, 255  // Cyan
+};
+
+CRGBPalette16 wavePalette = wave_palette;
+
+DEFINE_GRADIENT_PALETTE(emerald_palette){
+    0, 2, 115, 1,     // Dark Green
+    63, 3, 210, 44,   // Bright Green
+    127, 6, 87, 0,    // Deep Green
+    191, 41, 102, 35, // Olive Green
+    252, 0, 236, 170  // Aqua Green
+};
+
+CRGBPalette16 emeraldPalette = emerald_palette;
+
+DEFINE_GRADIENT_PALETTE(firey_night_palette){
+    0, 247, 36, 36,    // Bright Red
+    23, 134, 29, 253,  // Purple
+    38, 253, 34, 34,   // Red
+    53, 103, 1, 8,     // Dark Red
+    76, 252, 80, 65,   // Coral
+    97, 235, 79, 242,  // Light Purple
+    120, 255, 0, 0,    // Pure Red
+    140, 119, 10, 242, // Blue-Violet
+    155, 254, 28, 32,  // Bright Red
+    196, 232, 39, 39,  // Soft Red
+    255, 167, 69, 252  // Violet
+};
+
+CRGBPalette16 fireyNightPalette = firey_night_palette;
+
+DEFINE_GRADIENT_PALETTE(meadow_palette){
+    0, 12, 203, 163,   // Teal Green
+    61, 0, 92, 49,     // Dark Green
+    63, 0, 87, 44,     // Deep Green
+    124, 58, 182, 51,  // Bright Green
+    160, 124, 255, 57, // Light Green
+    232, 131, 209, 10, // Lime Green
+    255, 147, 236, 0   // Yellow Green
+};
+
+CRGBPalette16 meadowPalette = meadow_palette;
+
 #endif

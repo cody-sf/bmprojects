@@ -6,10 +6,13 @@
 #include <ArduinoBLE.h>
 #include "Helpers.h"
 #include "SyncController.h"
+#include <ArduinoJson.h>
 
+// BT Devices
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 uint32_t value = 0;
+unsigned long lastBluetoothSync = 0;
 
 // Rotary encoder pins
 #define ENCODER_PIN_A 16
@@ -63,18 +66,28 @@ const int OFF_TIME = 5000;
 // BT Setup
 BLEService bikeService(SERVICE_UUID);
 // create switch characteristic and allow remote device to read and write
-BLECharacteristic featuresCharacteristic(FEATURES_UUID, BLERead | BLEWrite, 512);
+BLECharacteristic featuresCharacteristic(FEATURES_UUID, BLERead | BLEWrite | BLENotify, 512);
 
 #define LED_OUTPUT_PIN_MAIN 27
 #define NUM_LEDS_MAIN 90
 
 #define LED_OUTPUT_PIN_BASKET 25
-#define NUM_LEDS_BASKET 600
+#define NUM_LEDS_BASKET 200
 
 #define LED_OUTPUT_PIN_FENDER 23
 #define NUM_LEDS_FENDER 75
 
-#define COLOR_ORDER GRB
+
+// Brandon/Generic
+// #define LED_OUTPUT_PIN_MAIN 27
+// #define NUM_LEDS_MAIN 150
+
+// #define LED_OUTPUT_PIN_BASKET 25
+// #define NUM_LEDS_BASKET 150
+
+// CHANGE
+#define COLOR_ORDER GRB 
+// #define COLOR_ORDER RGB
 static Device bike;
 
 // LED Strips/Lightshow
@@ -86,6 +99,7 @@ static CLEDController &led_controller_1 = FastLED.addLeds<WS2812B, LED_OUTPUT_PI
 static CLEDController &led_controller_2 = FastLED.addLeds<WS2812B, LED_OUTPUT_PIN_BASKET, RGB>(leds2, NUM_LEDS_BASKET);
 static CLEDController &led_controller_3 = FastLED.addLeds<WS2812B, LED_OUTPUT_PIN_FENDER, COLOR_ORDER>(leds3, NUM_LEDS_FENDER);
 static std::vector<CLEDController *> led_controllers = {&led_controller_1, &led_controller_2, &led_controller_3};
+// static std::vector<CLEDController *> led_controllers = {&led_controller_1, &led_controller_2};
 static LightShow light_show(led_controllers);
 
 std::pair<CRGBPalette16, CRGBPalette16> palettes = light_show.getPrimarySecondaryPalettes();
@@ -108,6 +122,28 @@ std::string toLowerCase(const std::string &input)
   for (auto &c : output)
     c = tolower(c);
   return output;
+}
+
+void sendStatusUpdate()
+{
+  StaticJsonDocument<512> doc;
+  LightScene deviceScene = light_show.getCurrentScene();
+
+  // Add all the settings and their values
+  doc["power"] = power;
+  doc["currentSceneId"] = deviceScene.scene_id; // You may want to convert this to a string if it's an enum
+  doc["brightness"] = deviceScene.brightness;
+  doc["speed"] = deviceScene.speed;
+  doc["direction"] = reverseStrip;
+  doc["palette"] = paletteToString(deviceScene.primary_palette); // Assume you have a function to convert palette to string
+
+  String output;
+  serializeJson(doc, output);
+
+  // Send the JSON string via the BLE characteristic
+  Serial.print("Sending notify status: ");
+  Serial.println(output.c_str());
+  featuresCharacteristic.setValue(output.c_str());
 }
 
 // TODO clean this up!
@@ -137,8 +173,8 @@ void setMode(std::string show)
 void featureCallback(BLEDevice central, BLECharacteristic characteristic)
 {
   Serial.println("Received a thing");
-  const uint8_t *buffer = featuresCharacteristic.value();       
-  unsigned int dataLength = featuresCharacteristic.valueLength(); 
+  const uint8_t *buffer = featuresCharacteristic.value();
+  unsigned int dataLength = featuresCharacteristic.valueLength();
 
   std::string value((char *)buffer, dataLength);
   if (!value.empty())
@@ -156,7 +192,6 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       return;
     }
 
-
     if (feature == 0x02)
     {
 
@@ -168,10 +203,10 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     {
       int b = 0;
       memcpy(&b, value.data() + 1, sizeof(int));
-      Serial.print("Brightness: ");
+      Serial.print("BT Brightness: ");
       Serial.println(b);
       brightness = b;
-      light_show.brightness(brightness);
+      syncController.setBrightness(brightness);
       return;
     }
 
@@ -278,7 +313,7 @@ void loop()
   BLE.poll();
   handleEncoderChange();
   yield();
-
+  syncBluetoothSettings();
   if (!power)
   {
     FastLED.clear();
@@ -289,6 +324,7 @@ void loop()
   light_show.render();
 }
 
+// Bluetooth Helpers
 void blePeripheralConnectHandler(BLEDevice central)
 {
   // central connected event handler
@@ -303,6 +339,15 @@ void blePeripheralDisconnectHandler(BLEDevice central)
   Serial.print("Disconnected event, central: ");
   Serial.println(central.address());
   deviceConnected = false;
+}
+
+void syncBluetoothSettings()
+{
+  if ((millis() - lastBluetoothSync) > DEFAULT_BT_REFRESH_INTERVAL && deviceConnected)
+  {
+    sendStatusUpdate();
+    lastBluetoothSync = millis();
+  }
 }
 
 bool buttonInitialized = false;
@@ -354,13 +399,15 @@ void handleEncoderChange()
       syncController.handleButtonShortPress();
       delay(100);
     }
-    else if(pressDuration > SHORT_PRESS_TIME && pressDuration < OFF_TIME)
+    else if (pressDuration > SHORT_PRESS_TIME && pressDuration < OFF_TIME)
     {
       // Long Press
       Serial.println("Long Press");
       syncController.handleButtonLongPress();
       delay(100);
-    } else {
+    }
+    else
+    {
       power = power ? 0 : 1;
     }
   }

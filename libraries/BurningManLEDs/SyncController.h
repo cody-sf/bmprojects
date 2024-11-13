@@ -11,6 +11,8 @@
 #include <GlobalDefaults.h>
 #include <DeviceRoles.h>
 #include <map>
+#include <LocationService.h>
+#include <Position.h>
 
 #define DEFAULT_ORIGIN_LATITUDE 40.786331
 #define DEFAULT_ORIGIN_LONGITUDE -119.206489
@@ -19,6 +21,9 @@
 #define ORIGIN_COLOR CRGB::White
 #define MAX_SPEED 16.0
 #define DEFAULT_BRIGHTNESS 25
+#define DEFAULT_POSITION_STATUS_POLL_INTERVAL 5000
+#define MAX_SPEED 25.0
+#define LINEAR_SPECTRUM_MAX_HUE 191
 
 enum MessageType : uint8_t
 {
@@ -60,6 +65,15 @@ public:
     void changeMode(LightSceneID mode);
     void handleDialTurn(int8_t direction);
     void shouldDeviceSync(bool shouldSync);
+    // Backpack specific function
+    void positionStatus(LocationService &location_service);
+    void colorWheel(LocationService &location_service);
+    void colorRadial(LocationService &location_service, CRGB color1, CRGB color2);
+    void speedometer(LocationService &location_service, CRGB color1, CRGB color2);
+    void jacketDance(CRGB color);
+    void setOrigin(const Position &origin);
+    void setRadiusInner(unsigned int radius_inner);
+    void setRadiusOuter(unsigned int radius_outer);
 
 private:
     static SyncController *instance_;
@@ -75,6 +89,11 @@ private:
     size_t palette_index_;
     bool direction_;
     bool shouldSync_;
+    CRGB getColorWheelColor(LocationService &location_service);
+    CRGB getRadialColor(LocationService &location_service, CRGB color1, CRGB color2);
+    Position origin_;
+    unsigned int radius_inner_;
+    unsigned int radius_outer_;
 };
 
 #endif // SYNC_CONTROLLER_H

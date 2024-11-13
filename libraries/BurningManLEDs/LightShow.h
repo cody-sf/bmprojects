@@ -21,27 +21,43 @@ enum LightSceneID : uint8_t
     strobe,
     sparkle,
     breathe,
-    setCHSV
+    setCHSV,
+    position_status,
+    color_wheel,
+    speedometer,
+    jacketDance,
+    color_radial
 };
 
 enum AvailablePalettes : uint8_t
 {
+    candy,
     cool,
+    cosmicwaves,
     earth,
+    eblossom,
+    emerald,
     everglow,
     fatboy,
     fireice,
+    fireynight,
     flame,
     heart,
     lava,
+    meadow,
     melonball,
+    nebula,
+    oasis,
     pinksplash,
     r,
     sofia,
     sunset,
+    sunsetfusion,
     trove,
+    vivid,
     velvet,
-    vga
+    vga,
+    wave,
 };
 
 struct LightScene
@@ -52,6 +68,8 @@ struct LightScene
     uint32_t reference_time;
     uint16_t speed;
     AvailablePalettes primary_palette;
+    CRGB color;
+    bool direction;
     union
     {
         struct
@@ -180,6 +198,7 @@ private:
     uint16_t speed_;
     std::vector<CRGBPalette16 *> available_palettes_;
     AvailablePalettes current_palette_;
+    CRGB color_;
 };
 
 #endif // LIGHTSHOW_H

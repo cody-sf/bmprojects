@@ -9,8 +9,11 @@
 #define TIMEZONE_OFFSET (7 * 60 * 60) // GMT-7
 
 // Define the pins for the GPS module if it's connected via a serial interface
-#define GPS_RX_PIN 17 // Example pin for GPS RX
-#define GPS_TX_PIN 16 // Example pin for GPS TX
+// 17, 16 for Vinny/Ashton
+// 16, 17 for everyone eles
+
+#define GPS_RX_PIN 16 // Example pin for GPS RX
+#define GPS_TX_PIN 17 // Example pin for GPS TX
 
 class LocationService
 {

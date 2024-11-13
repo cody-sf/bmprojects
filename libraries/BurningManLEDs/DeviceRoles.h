@@ -9,7 +9,10 @@
 #define DEVICE_ROLE_FANNYPACK 0x4
 #define DEVICE_ROLE_COWBOYHAT 0x5
 #define DEVICE_ROLE_PATIO 0x6
+#define DEVICE_ROLE_FANNYPACK_2 0x7
+#define DEVICE_ROLE_CAMP 0x8
 #define DEVICE_ROLE_ALL 0xff
+#define DEVICE_ROLE_BOOFER 0x9
 
 enum class Device
 {
@@ -18,8 +21,11 @@ enum class Device
     backpack,
     umbrella,
     fannypack,
+    fannypack2,
     cowboyhat,
-    patio
+    patio,
+    camp,
+    boofer,
 };
 
 std::string getDeviceName(Device device);

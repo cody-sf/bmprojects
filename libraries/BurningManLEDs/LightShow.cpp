@@ -4,7 +4,7 @@
 
 LightShow::LightShow(const std::vector<CLEDController *> &led_controllers, const Clock &clock)
     : led_controllers_(led_controllers), clock_(clock), scene_changed_(false), hue_(0), frame_number_(0), scale_(0), palette_index_(0), palette_size_(0),
-      current_palette_(AvailablePalettes::cool), primary_palette_(getPalette(AvailablePalettes::cool)), secondary_palette_(getPalette(AvailablePalettes::earth))
+      current_palette_(AvailablePalettes::cool), primary_palette_(getPalette(AvailablePalettes::cool)), secondary_palette_(getPalette(AvailablePalettes::earth)), speed_(175), color_(CRGB::Red), direction_(true)
 {
     // Initialize the active scene to default settings
     memset(&active_scene_, 0, sizeof(active_scene_));
@@ -12,22 +12,33 @@ LightShow::LightShow(const std::vector<CLEDController *> &led_controllers, const
 
     // Initialize the available palettes
     available_palettes_ = {
+        &candyPalette,
         &coolPalette,
+        &cosmicWavesPalette,
         &earthPalette,
+        &eblossomPalette,
+        &emeraldPalette,
         &everglowPalette,
         &fatboyPalette,
         &fireicePalette,
+        &fireyNightPalette,
         &flamePalette,
         &heartPalette,
         &lavaPalette,
+        &meadowPalette,
         &melonballPalette,
+        &nebulaPalette,
+        &oasisPalette,
         &pinksplashPalette,
         &rPalette,
         &sofiaPalette,
         &sunsetPalette,
+        &sunsetFusionPalette,
         &trovePalette,
+        &vividPalette,
         &velvetPalette,
         &vgaPalette,
+        &wavePalette,
         // Add other palettes as needed
     };
 }
@@ -44,24 +55,40 @@ CRGBPalette16 LightShow::getPalette(AvailablePalettes palette)
 {
     switch (palette)
     {
+    case candy:
+        return candy_palette;
     case cool:
         return cool_palette;
+    case cosmicwaves:
+        return cosmic_waves_palette;
     case earth:
         return earth_palette;
+    case eblossom:
+        return electric_blossom_palette;
+    case emerald:
+        return emerald_palette;
     case everglow:
         return everglow_palette;
     case fatboy:
         return fatboy_palette;
     case fireice:
         return fireice_palette;
+    case fireynight:
+        return firey_night_palette;
     case flame:
         return flame_palette;
     case heart:
         return heart_palette;
     case lava:
         return lava_palette;
+    case meadow:
+        return meadow_palette;
     case melonball:
         return melonball_palette;
+    case nebula:
+        return nebula_palette;
+    case oasis:
+        return oasis_palette;
     case pinksplash:
         return pinksplash_palette;
     case r:
@@ -70,12 +97,18 @@ CRGBPalette16 LightShow::getPalette(AvailablePalettes palette)
         return sofia_palette;
     case sunset:
         return sunset_palette;
+    case sunsetfusion:
+        return sunset_fusion_palette;
     case trove:
         return trove_palette;
+    case vivid:
+        return vivid_palette;
     case velvet:
         return velvet_palette;
     case vga:
         return vga_palette;
+    case wave:
+        return wave_palette;
     default:
         return vga_palette; // Default or error palette
     }
@@ -108,6 +141,7 @@ void LightShow::solid(const CRGB &color)
     LightScene new_scene = {};
     new_scene.scene_id = LightSceneID::solid;
     new_scene.scenes.solid.color = color;
+    new_scene.color = color;
     apply_scene_updates(new_scene);
 }
 
@@ -137,6 +171,7 @@ void LightShow::palette_stream(uint16_t duration, AvailablePalettes palette, boo
     new_scene.scenes.palette_stream.palette = palette;
     new_scene.scenes.palette_stream.duration = duration;
     new_scene.scenes.palette_stream.direction = direction;
+    new_scene.direction = direction;
     apply_scene_updates(new_scene);
 
     if (!scene_changed_)
@@ -292,31 +327,49 @@ void LightShow::apply_scene_updates(LightScene &new_scene)
 
 void LightShow::apply_sync_updates(LightScene &new_scene)
 {
-    Serial.println("Weve reached the correct apply_sync_update");
+    brightness_ = new_scene.brightness;
+    active_scene_.brightness = brightness_;
+
+    if (active_scene_.color != new_scene.color)
+    {
+        Serial.println("Color has changed");
+        active_scene_.color = new_scene.color;
+        color_ = new_scene.color;
+        scene_changed_ = true;
+    }
     if (active_scene_.primary_palette != new_scene.primary_palette)
     {
-        Serial.println("Primary Palette has changed, setting active scene palete to it!");
+        Serial.println("Primary Palette has changed");
         active_scene_.primary_palette = new_scene.primary_palette;
         scene_changed_ = true;
     }
-    if (active_scene_.scene_id != new_scene.scene_id ||
-        memcmp(&active_scene_.scenes, &new_scene.scenes, sizeof(active_scene_.scenes)) != 0)
+    if (active_scene_.scene_id != new_scene.scene_id)
+    // ||
+    // memcmp(&active_scene_.scenes, &new_scene.scenes, sizeof(active_scene_.scenes)) != 0)
     {
-        Serial.println("Scene ID has changed, setting active scene to new scene!");
-        active_scene_ = new_scene;
+        Serial.println("Scene ID has changed");
+        active_scene_.scene_id = new_scene.scene_id;
         scene_changed_ = true;
     }
     if (active_scene_.speed != new_scene.speed)
     {
-        Serial.println("Speed has changed, setting active scene speed to new scene speed!");
+        Serial.println("Speed has changed");
         active_scene_.speed = new_scene.speed;
         scene_changed_ = true;
+        speed_ = new_scene.speed;
     }
     if (active_scene_.brightness != new_scene.brightness)
     {
-        Serial.println("Brightness has changed, setting active scene brightness to new scene brightness!");
+        Serial.println("Brightness has changed");
         active_scene_.brightness = new_scene.brightness;
         scene_changed_ = true;
+    }
+    if (active_scene_.direction != new_scene.direction)
+    {
+        Serial.println("Direction has changed");
+        active_scene_.direction = new_scene.direction;
+        scene_changed_ = true;
+        direction_ = new_scene.direction;
     }
 }
 
@@ -352,7 +405,7 @@ void LightShow::render()
             last_render_time_ = now;
             for (auto &controller : led_controllers_)
             {
-                controller->showColor(active_scene_.scenes.solid.color, active_scene_.brightness);
+                controller->showColor(active_scene_.color, active_scene_.brightness);
             }
         }
         break;
@@ -413,7 +466,7 @@ void LightShow::render()
                 }
 
                 hue_ = (hue_ + 1) % 255;
-                controller->showLeds(active_scene_.brightness);
+                controller->showLeds(brightness_);
             }
         }
         break;

@@ -11,11 +11,11 @@ LocationService::LocationService() : initial_gps_sample_acquired_(false),
     {
         speed_history_[i] = 0;
     }
-    gpsSerial.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); // Adjust baud rate as per your GPS module's specs
 }
 
 void LocationService::start_tracking_position()
 {
+    gpsSerial.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
     Serial.println("GPS initialized");
 }
 
@@ -29,7 +29,8 @@ void LocationService::update_position()
     }
     while (gpsSerial.available() > 0)
     {
-        if (gps.encode(gpsSerial.read()))
+        char c = gpsSerial.read();
+        if (gps.encode(c))
         {
             if (gps.location.isValid())
             {
