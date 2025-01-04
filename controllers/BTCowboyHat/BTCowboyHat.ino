@@ -23,7 +23,7 @@ BLEService hatService(SERVICE_UUID);
 BLECharacteristic featuresCharacteristic(FEATURES_UUID, BLERead | BLEWrite | BLENotify, 512);
 // Xiao ESP32c3 - hold boot and reset button if not working
 // Aleg D7, other C3 unites 7
-#define LED_OUTPUT_PIN D7
+#define LED_OUTPUT_PIN 7
 #define NUM_LEDS 350
 #define COLOR_ORDER GRB
 static Device cowboyhat;

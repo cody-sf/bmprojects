@@ -1,23 +1,18 @@
 #include "arduinoFFT.h"
 #include <FastLED.h>
 #include <GlobalDefaults.h>
+#include <Clock.h>
 #include <LightShow.h>
 #include <DeviceRoles.h>
 #include <ArduinoBLE.h>
 #include "Helpers.h"
 #include "SyncController.h"
 #include <driver/i2s.h>
-#include <Preferences.h>
-#include <ArduinoJson.h>
-
-// Preferences
-Preferences preferences;
 
 // Bluetooth
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 uint32_t value = 0;
-unsigned long lastBluetoothSync = 0;
 
 static Device umbrella;
 
@@ -30,23 +25,20 @@ static Device umbrella;
 BLEService umbrellaService(SERVICE_UUID);
 // create switch characteristic and allow remote device to read and write
 BLECharacteristic featuresCharacteristic(FEATURES_UUID, BLERead | BLEWrite | BLENotify, 512);
-
-// Mic Variables
-#define SAMPLES 256             // Must be a power of 2
-#define SAMPLING_FREQ 46000.0   // Hz, max frequency analyzed = sampleF/2
-volatile int AMPLITUDE = 1000;  // Adjust for microphone sensitivity
-volatile int NOISE = 500;       // Noise threshold for filtering
-#define I2S_PORT I2S_NUM_0      // I2S Port
-#define I2S_SCK_PIN GPIO_NUM_26 // Bit Clock
-#define I2S_WS_PIN GPIO_NUM_22  // Word Select (LRCLK)
-#define I2S_SD_PIN GPIO_NUM_21  // Data Input
-
 // Umbrella Variables
-#define LEDS_PER_STRIP 30 // Number of LEDs per strip
-#define NUM_STRIPS 8      // Number of LED strips
-#define FREQUENCY_BANDS 8
-#define LED_TYPE WS2812B // Type of LED strip
-#define COLOR_ORDER GRB  // Color order for the LED strip
+#define SAMPLES 256         // Number of samples for FFT
+#define SAMPLING_FREQ 36000 // Sampling frequency
+#define FREQUENCY_BANDS 8   // Number of frequency bands (and LED strips)
+#define LEDS_PER_STRIP 30   // Number of LEDs per strip
+#define NUM_STRIPS 8        // Number of LED strips
+#define LED_TYPE WS2812B    // Type of LED strip
+#define COLOR_ORDER GRB     // Color order for the LED strip
+
+
+#define I2S_PORT I2S_NUM_0     // I2S Port
+#define I2S_SCK_PIN     GPIO_NUM_26   // Bit Clock
+#define I2S_WS_PIN      GPIO_NUM_22   // Word Select (LRCLK)
+#define I2S_SD_PIN      GPIO_NUM_21   // Data Input
 
 // LED Strips/Lightshow
 CRGB leds[NUM_STRIPS][LEDS_PER_STRIP]; // Array to hold LED data
@@ -61,6 +53,7 @@ static CLEDController &led_controller_6 = FastLED.addLeds<LED_TYPE, 25, COLOR_OR
 static CLEDController &led_controller_7 = FastLED.addLeds<LED_TYPE, 33, COLOR_ORDER>(leds[6], LEDS_PER_STRIP);
 static CLEDController &led_controller_8 = FastLED.addLeds<LED_TYPE, 32, COLOR_ORDER>(leds[7], LEDS_PER_STRIP);
 static std::vector<CLEDController *> led_controllers = {&led_controller_1, &led_controller_2, &led_controller_3, &led_controller_4, &led_controller_5, &led_controller_6, &led_controller_7, &led_controller_8};
+// static Clock umbrellaClock;
 static LightShow light_show(led_controllers);
 
 std::pair<CRGBPalette16, CRGBPalette16> palettes = light_show.getPrimarySecondaryPalettes();
@@ -73,9 +66,9 @@ double vImag[SAMPLES];
 ArduinoFFT<double> FFT = ArduinoFFT<double>(vReal, vImag, SAMPLES, SAMPLING_FREQ);
 
 // Umbrella variables
-volatile int brightness = 25;
-volatile int speed = 100;
-volatile float reference = log10(50.0); // Adjust this based on your setup
+int brightness = 25;
+int speed = 100;
+float reference = log10(50.0); // Adjust this based on your setup
 bool decay = 0;
 int decayRate = 100;
 bool reverseStrip = true;
@@ -199,15 +192,13 @@ void setup()
 {
   Serial.begin(115200);
   delay(1000);
-  loadSettings();
-
   if (!BLE.begin())
   {
     Serial.println("starting Bluetooth® Low Energy module failed!");
     while (1)
       ;
   }
-  BLE.setLocalName("Umbrella-CL");
+    BLE.setLocalName("Umbrella-CL");
   BLE.setAdvertisedService(umbrellaService);
   umbrellaService.addCharacteristic(featuresCharacteristic);
   BLE.addService(umbrellaService);
@@ -224,15 +215,6 @@ void setup()
 
   syncController.begin(CURRENT_USER);
 
-  for (int i = 0; i < NUM_STRIPS; i++)
-  {
-    for (int j = 0; j < LEDS_PER_STRIP; j++)
-    {
-      ledState[i][j] = 0;
-    }
-  }
-
-  // I2S Microphone Configuration
   i2s_config_t i2s_config = {
       .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
       .sample_rate = SAMPLING_FREQ,
@@ -242,109 +224,143 @@ void setup()
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
       .dma_buf_count = 8,
       .dma_buf_len = 1024,
-      .use_apll = false};
+      .use_apll = false
+  };
 
   i2s_pin_config_t pin_config = {
       .bck_io_num = I2S_SCK_PIN,
       .ws_io_num = I2S_WS_PIN,
       .data_out_num = I2S_PIN_NO_CHANGE,
-      .data_in_num = I2S_SD_PIN};
+      .data_in_num = I2S_SD_PIN
+  };
 
   esp_err_t err = i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
-  if (err != ESP_OK)
-  {
-    Serial.printf("I2S driver install failed: %s\n", esp_err_to_name(err));
-    while (true)
-      ;
+  if (err != ESP_OK) {
+      Serial.printf("I2S driver install failed: %s\n", esp_err_to_name(err));
+      while (true);
   }
   i2s_set_pin(I2S_PORT, &pin_config);
 
+  
+  for (int i = 0; i < NUM_STRIPS; i++)
+  {
+    for (int j = 0; j < LEDS_PER_STRIP; j++)
+    {
+      ledState[i][j] = 0;
+    }
+  }
   light_show.brightness(brightness);
-  light_show.palette_stream(speed, AP_palette);
 }
 
-void loop()
-{
-  BLE.poll();
-  syncBluetoothSettings();
-  if (!power)
-  {
-    FastLED.clear();
-    FastLED.show();
-    return;
-  }
 
-  if (!soundSensitive)
-  {
+  void loop()
+{
+    BLE.poll();
+
+    if (!power)
+    {
+        FastLED.clear();
+        FastLED.show();
+        return;
+    }
+
+    if (!soundSensitive)
+    {
+        light_show.render();
+        return;
+    }
+
+    // Handle Lights
+    // Take samples
+    for (int i = 0; i < SAMPLES; i++)
+    {
+        int16_t sample;
+        size_t bytesRead = 0;
+        i2s_read(I2S_NUM_0, &sample, sizeof(sample), &bytesRead, portMAX_DELAY);
+        if (bytesRead > 0)
+        {
+            vReal[i] = (double)sample;
+            vImag[i] = 0.0;
+        }
+    }
+
+    // Compute FFT
+    FFT.dcRemoval();
+    FFT.windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+    FFT.compute(FFT_FORWARD);
+    FFT.complexToMagnitude();
+
+    double median[FREQUENCY_BANDS] = {0};
+    double max[FREQUENCY_BANDS] = {0};
+    int index = 0;
+    double hzPerSample = (1.0 * SAMPLING_FREQ) / SAMPLES;
+    double hz = 0;
+    double sum = 0;
+    int count = 0;
+    for (int i = 2; i < (SAMPLES / 2); i++)
+    {
+        count++;
+        sum += vReal[i];
+        if (vReal[i] > max[index])
+        {
+            max[index] = vReal[i];
+        }
+        if (hz > (index + 1) * (SAMPLING_FREQ / 2.0) / FREQUENCY_BANDS)
+        {
+            median[index] = sum / count;
+            sum = 0.0;
+            count = 0;
+            index++;
+        }
+        hz += hzPerSample;
+    }
+
+    // Update LED strips based on FFT results
+    if (decay)
+    {
+        for (int band = 0; band < FREQUENCY_BANDS; band++)
+        {
+            int newHeight = (median[band] > 0) ? 20.0 * (log10(median[band]) - reference) : 1;
+            newHeight = constrain(newHeight, 1, LEDS_PER_STRIP);
+
+            for (int i = 0; i < LEDS_PER_STRIP; i++)
+            {
+                if (i < newHeight)
+                {
+                    uint8_t paletteIndex = map(i, 0, LEDS_PER_STRIP - 1, 0, 255);
+                    leds[band][i] = ColorFromPalette(primaryPalette, paletteIndex);
+                }
+                else
+                {
+                    ledState[band][i] = ledState[band][i] - decayRate > 0 ? ledState[band][i] - decayRate : 0;
+                    int hue = (i * 255 / LEDS_PER_STRIP) + (band * 30);
+                    leds[band][i] = CHSV(hue, 255, ledState[band][i]);
+                }
+            }
+        }
+    }
+    else
+    {
+        for (int band = 0; band < FREQUENCY_BANDS; band++)
+        {
+            int newHeight = (median[band] > 0) ? 20.0 * (log10(median[band]) - reference) : 1;
+            newHeight = constrain(newHeight, 1, LEDS_PER_STRIP);
+
+            for (int i = 0; i < LEDS_PER_STRIP; i++)
+            {
+                uint8_t onPaletteIndex = map(i, 0, LEDS_PER_STRIP - 1, 0, 255);
+                uint8_t offPaletteIndex = map(i, 0, LEDS_PER_STRIP - 1, 0, 255);
+                leds[band][i] = (i < newHeight) ? ColorFromPalette(primaryPalette, onPaletteIndex) : ColorFromPalette(secondaryPalette, offPaletteIndex);
+            }
+        }
+    }
+
+    if (reverseStrip)
+    {
+        reverseLEDs();
+    }
+
     light_show.render();
-    return;
-  }
-  else
-  {
-    handleSoundShow();
-    return;
-  }
-}
-
-void handleSoundShow()
-{
-  // Reset FFT arrays
-  for (int i = 0; i < SAMPLES; i++)
-  {
-    vReal[i] = 0;
-    vImag[i] = 0;
-  }
-
-  // Sample audio from INMP441
-  for (int i = 0; i < SAMPLES; i++)
-  {
-    int16_t sample;
-    size_t bytes_read;
-    i2s_read(I2S_PORT, &sample, sizeof(sample), &bytes_read, portMAX_DELAY);
-    if (bytes_read > 0)
-    {
-      vReal[i] = (double)sample; // Store sample in FFT input
-    }
-  }
-  // Compute FFT
-  FFT.dcRemoval();
-  FFT.windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);
-  FFT.compute(FFT_FORWARD);
-  FFT.complexToMagnitude();
-
-  int bandValues[NUM_STRIPS] = {0};
-
-  // Map FFT results to LED strips
-  for (int i = 2; i < (SAMPLES / 2); i++)
-  {
-    if (vReal[i] > NOISE)
-    {
-      int bandIndex = map(i, 2, SAMPLES / 2, 0, NUM_STRIPS - 1);
-      bandValues[bandIndex] += (int)vReal[i];
-    }
-  }
-
-  // Update each LED strip
-  for (int strip = 0; strip < NUM_STRIPS; strip++)
-  {
-    int barHeight = bandValues[strip] / AMPLITUDE;
-    if (barHeight > LEDS_PER_STRIP)
-      barHeight = LEDS_PER_STRIP;
-
-    for (int i = 0; i < LEDS_PER_STRIP; i++)
-    {
-      uint8_t onPaletteIndex = map(i, 0, LEDS_PER_STRIP - 1, 0, 255);
-      uint8_t offPaletteIndex = map(i, 0, LEDS_PER_STRIP - 1, 0, 255);
-      leds[strip][i] = (i < barHeight) ? ColorFromPalette(primaryPalette, onPaletteIndex) : ColorFromPalette(secondaryPalette, offPaletteIndex);
-    }
-  }
-
-  if (reverseStrip)
-  {
-    reverseLEDs();
-  }
-
-  light_show.render();
 }
 
 void reverseLEDs()
@@ -362,7 +378,6 @@ void blePeripheralConnectHandler(BLEDevice central)
   Serial.print("Connected event, central: ");
   Serial.println(central.address());
   deviceConnected = true;
-  sendStatusUpdate();
 }
 
 void blePeripheralDisconnectHandler(BLEDevice central)
@@ -373,54 +388,3 @@ void blePeripheralDisconnectHandler(BLEDevice central)
   deviceConnected = false;
 }
 
-// Preference Helpers
-void saveSettings()
-{
-  preferences.begin("settings", false);
-  preferences.putInt("noise", NOISE);
-  preferences.putInt("amplitude", AMPLITUDE);
-  preferences.end();
-}
-
-void loadSettings()
-{
-  preferences.begin("settings", true);
-  NOISE = preferences.getInt("noise", 500);
-  AMPLITUDE = preferences.getInt("amplitude", 1000);
-  preferences.end();
-}
-
-void sendStatusUpdate()
-{
-  StaticJsonDocument<512> doc;
-  LightScene deviceScene = light_show.getCurrentScene();
-
-  // Add all the settings and their values
-  doc["power"] = power;
-  doc["bright"] = deviceScene.brightness;
-  doc["speed"] = deviceScene.speed;
-  doc["dir"] = reverseStrip;
-  doc["primPal"] = paletteToString(deviceScene.primary_palette); // Assume you have a function to convert palette to string
-  // doc["secPal"] = paletteToString(light_show.getPrimarySecondaryPalettes().second);
-  doc["noise"] = NOISE;
-  doc["amp"] = AMPLITUDE;
-  doc["sens"] = reference;
-  doc["soundSens"] = soundSensitive;
-
-  String output;
-  serializeJson(doc, output);
-
-  // Send the JSON string via the BLE characteristic
-  Serial.print("Sending notify status: ");
-  Serial.println(output.c_str());
-  featuresCharacteristic.setValue(output.c_str());
-}
-
-void syncBluetoothSettings()
-{
-  if ((millis() - lastBluetoothSync) > DEFAULT_BT_REFRESH_INTERVAL && deviceConnected)
-  {
-    sendStatusUpdate();
-    lastBluetoothSync = millis();
-  }
-}
