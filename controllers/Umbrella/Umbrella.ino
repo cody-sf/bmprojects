@@ -192,6 +192,14 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       syncController.setBrightness(brightness);
       return;
     }
+
+    // Save Settings
+    if (feature == 0x0A)
+    {
+      Serial.println("Saving Settings");
+      saveSettings();
+      return;
+    }
   }
 };
 
@@ -377,6 +385,8 @@ void blePeripheralDisconnectHandler(BLEDevice central)
 void saveSettings()
 {
   preferences.begin("settings", false);
+  preferences.putInt("brightness", brightness);
+  preferences.putInt("speed", speed);
   preferences.putInt("noise", NOISE);
   preferences.putInt("amplitude", AMPLITUDE);
   preferences.end();
@@ -385,6 +395,8 @@ void saveSettings()
 void loadSettings()
 {
   preferences.begin("settings", true);
+  brightness = preferences.getInt("brightness", 25);
+  speed = preferences.getInt("speed", 100);
   NOISE = preferences.getInt("noise", 500);
   AMPLITUDE = preferences.getInt("amplitude", 1000);
   preferences.end();
@@ -406,6 +418,8 @@ void sendStatusUpdate()
   doc["amp"] = AMPLITUDE;
   doc["sens"] = reference;
   doc["soundSens"] = soundSensitive;
+  doc["dec"] = decay;
+  doc["decRate"] = decayRate;
 
   String output;
   serializeJson(doc, output);
