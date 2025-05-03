@@ -22,28 +22,34 @@ bool oldDeviceConnected = false;
 unsigned long lastBluetoothSync = 0;
 int soilMoistureValue = 0;
 int soilMoisturePercentage = 0;
+int averageValue = 0;      // Added global variable
+int readingsToAverage = 0; // Added global variable
+
+// Rolling average variables
+const int NUM_READINGS = 20;
+const int READING_INTERVAL = 3000; // 3 seconds
+int readings[NUM_READINGS] = {0};
+int readingIndex = 0;
+unsigned long lastReadingTime = 0;
+bool hasFullMinuteData = false; // Track if we have a full minute of readings
 
 // Calibration values
 const int DRY_VALUE = 2700; // Value when sensor is dry in dirt
 const int WET_VALUE = 1450; // Value when sensor is in water
 
-// Function declarations
-// void sendStatusUpdate();
-// void sendRawUpdate();
-// void featureCallback(BLEDevice central, BLECharacteristic characteristic);
-// void blePeripheralConnectHandler(BLEDevice central);
-// void blePeripheralDisconnectHandler(BLEDevice central);
-
 void sendStatusUpdate()
 {
     StaticJsonDocument<512> doc;
-    doc["moisture"] = soilMoisturePercentage;
     doc["raw"] = soilMoistureValue;
+    doc["average_raw"] = averageValue;
+    doc["readings_used"] = readingsToAverage;
+    doc["moisture"] = soilMoisturePercentage;
     String output;
     serializeJson(doc, output);
+    output += "\n"; // Add newline
 
-    Serial.print("Sending moisture status: ");
-    Serial.println(output.c_str());
+    Serial.print("Status: ");
+    Serial.print(output.c_str());
 
     featuresCharacteristic.setValue(output.c_str());
 }
@@ -163,27 +169,59 @@ void loop()
 {
     BLE.poll();
 
-    // Read soil moisture sensor
-    soilMoistureValue = analogRead(SOIL_MOISTURE_PIN);
-
-    // Convert to percentage (inverted because higher value = drier)
-    soilMoisturePercentage = map(soilMoistureValue, WET_VALUE, DRY_VALUE, 100, 0);
-    soilMoisturePercentage = constrain(soilMoisturePercentage, 0, 100);
-
-    // Print values for debugging
-    Serial.print("Raw Value: ");
-    Serial.print(soilMoistureValue);
-    Serial.print(" | Moisture: ");
-    Serial.print(soilMoisturePercentage);
-    Serial.println("%");
-
-    // Send updates if connected
-    if (deviceConnected && (millis() - lastBluetoothSync) > 1000)
+    // Take a reading every 3 seconds
+    if (millis() - lastReadingTime >= READING_INTERVAL)
     {
-        Serial.println("Sending periodic update...");
-        sendStatusUpdate();
-        lastBluetoothSync = millis();
+        // Read soil moisture sensor
+        soilMoistureValue = analogRead(SOIL_MOISTURE_PIN);
+
+        // Store the reading in our array
+        readings[readingIndex] = soilMoistureValue;
+
+        // Calculate how many readings we have
+        readingsToAverage = hasFullMinuteData ? NUM_READINGS : (readingIndex + 1);
+
+        // Calculate average of all readings
+        long sum = 0L;
+        for (int i = 0; i < readingsToAverage; i++)
+        {
+            sum += static_cast<long>(readings[i]);
+        }
+        averageValue = readingsToAverage > 0 ? static_cast<int>(sum / readingsToAverage) : soilMoistureValue;
+
+        // Move to next position in array
+        readingIndex = (readingIndex + 1) % NUM_READINGS;
+
+        // Check if we've filled the array once
+        if (readingIndex == 0)
+        {
+            hasFullMinuteData = true;
+        }
+
+        // Convert average to percentage
+        soilMoisturePercentage = map(averageValue, WET_VALUE, DRY_VALUE, 100, 0);
+        soilMoisturePercentage = constrain(soilMoisturePercentage, 0, 100);
+
+        // Print values for debugging
+        Serial.print("Raw Value: ");
+        Serial.print(soilMoistureValue);
+        Serial.print(" | Average Raw: ");
+        Serial.print(averageValue);
+        Serial.print(" | Readings used: ");
+        Serial.print(readingsToAverage);
+        Serial.print(" | Moisture: ");
+        Serial.print(soilMoisturePercentage);
+        Serial.println("%");
+
+        // Send updates if connected
+        if (deviceConnected && (millis() - lastBluetoothSync) > 1000)
+        {
+            sendStatusUpdate();
+            lastBluetoothSync = millis();
+        }
+
+        lastReadingTime = millis();
     }
 
-    delay(1000); // Delay between readings
+    delay(100); // Small delay to prevent CPU overload
 }
