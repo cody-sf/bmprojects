@@ -26,6 +26,7 @@ enum class Device
     patio,
     camp,
     boofer,
+    plantmonitor,
 };
 
 std::string getDeviceName(Device device);

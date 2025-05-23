@@ -75,7 +75,8 @@
     "algorithm": "cpp",
     "*.ipp": "cpp",
     "cfenv": "cpp",
-    "execution": "cpp"
+    "execution": "cpp",
+    "print": "cpp"
   },
   "files.autoSave": "off",
   "eslint.format.enable": true
