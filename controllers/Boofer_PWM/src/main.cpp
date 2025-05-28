@@ -5,17 +5,35 @@
 #include <Preferences.h>
 #include "Helpers.h"
 
+// Forward declarations
+void warmupIgnition();
+void updateWarmupProcess();
+void handlePressureSensor();
+void blePeripheralConnectHandler(BLEDevice central);
+void blePeripheralDisconnectHandler(BLEDevice central);
+void sendStatusUpdate();
+void sendConfigStatusUpdate();
+void syncBluetoothStatus();
+void syncBluetoothSettings();
+void saveSettings();
+void loadSettings();
+void restoreDefaults();
+void checkValveSafety();
+void checkReleaseTimer();
+
 static Device boofer;
 #define SOLENOID_PIN 18
 #define IGNITION_PIN 25 // The pin connected to TRIG/PWM on the MOSFET module
 #define PRESSURE_PIN 34
 #define SERVICE_UUID "17504d91-b22e-4455-a466-1521d6c4c4af"
-#define FEATURES_UUID "8ce6e2d0-093b-456a-9c39-322b268e1bc0"
+#define COMMAND_UUID "8ce6e2d0-093b-456a-9c39-322b268e1bc0" // Commands TO device
+#define STATUS_UUID "7f3a0b45-8d2c-4789-a1b6-3e4f5c6d7e8f"  // Status FROM device
 
 Preferences preferences;
 
 BLEService booferService(SERVICE_UUID);
-BLECharacteristic featuresCharacteristic(FEATURES_UUID, BLERead | BLEWrite | BLENotify, 512);
+BLECharacteristic commandCharacteristic(COMMAND_UUID, BLEWrite, 512);
+BLECharacteristic statusCharacteristic(STATUS_UUID, BLERead | BLENotify, 512);
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 unsigned long lastStatusSync = 0;
@@ -58,36 +76,74 @@ float VoutMax;
 float pressureMax;
 int adcResolution;
 
-bool ignitionPower = false;
-bool valveOpen = false;
-int valveTimeout = 5000;
+// Non-blocking warmup state machine
+enum WarmupState
+{
+  WARMUP_IDLE,
+  WARMUP_STAGE1,
+  WARMUP_DELAY1,
+  WARMUP_STAGE2,
+  WARMUP_DELAY2,
+  WARMUP_STAGE3,
+  WARMUP_COMPLETE
+};
+WarmupState warmupState = WARMUP_IDLE;
+unsigned long warmupLastUpdate = 0;
+int warmupCurrentDutyCycle = 0;
 int shortBurst = 100;
 int longBurst = 1000;
 int currentIgnitionPower = 0;
 bool booferReady = false;
+bool ignitionPower = false;
+bool valveOpen = false;
+unsigned long valveOpenTime = 0;
+int valveTimeout = 5000; // Default 5 seconds
+bool releaseActive = false;
+unsigned long releaseStartTime = 0;
+int releaseDuration = 0;
 
 void featureCallback(BLEDevice central, BLECharacteristic characteristic)
 {
-  const uint8_t *buffer = featuresCharacteristic.value();
-  unsigned int dataLength = featuresCharacteristic.valueLength();
+  const uint8_t *buffer = commandCharacteristic.value();
+  unsigned int dataLength = commandCharacteristic.valueLength();
   std::string value((char *)buffer, dataLength);
 
-  if (!value.empty())
+  Serial.print("BLE Command Debug - Length: ");
+  Serial.print(dataLength);
+  Serial.print(", Raw bytes: ");
+  for (int i = 0; i < dataLength; i++)
+  {
+    Serial.print("0x");
+    Serial.print(buffer[i], HEX);
+    Serial.print(" ");
+  }
+  Serial.println();
+
+  if (!value.empty() && dataLength > 0)
   {
     uint8_t feature = value[0];
-    Serial.print("Feature: ");
-    Serial.println(feature);
+    Serial.print("Processing Feature: 0x");
+    Serial.println(feature, HEX);
 
     // Handle features
     switch (feature)
     {
     case 0x01: // On/Off
-      ignitionPower = value[1] != 0;
-
-      if (value[1] == 1 && !booferReady)
+      if (dataLength >= 2)
       {
-        Serial.println("Warmup Ignition");
-        warmupIgnition();
+        Serial.print("Ignition command - value[1]: ");
+        Serial.println(value[1]);
+        ignitionPower = value[1] != 0;
+
+        if (value[1] == 1 && !booferReady)
+        {
+          Serial.println("Warmup Ignition");
+          warmupIgnition();
+        }
+      }
+      else
+      {
+        Serial.println("Invalid ignition command - insufficient data");
       }
       break;
 
@@ -215,9 +271,67 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       break;
 
     case 0x10: // Restore Defaults
+    {
       Serial.println("Restore Defaults Command");
       restoreDefaults();
+    }
+    break;
+
+    case 0x11: // handle release
+    {
+      if (dataLength >= 5)
+      { // Need at least 1 byte for command + 4 bytes for int
+        int release = 0;
+        memcpy(&release, value.data() + 1, sizeof(int));
+        Serial.print("Release command - Starting non-blocking release for ");
+        Serial.print(release);
+        Serial.println(" ms");
+
+        // Start non-blocking release (prevents BLE corruption)
+        digitalWrite(SOLENOID_PIN, HIGH);
+        releaseActive = true;
+        releaseStartTime = millis();
+        releaseDuration = release;
+      }
+      else
+      {
+        Serial.print("Invalid release command - insufficient data. Length: ");
+        Serial.println(dataLength);
+      }
       break;
+    }
+
+    case 0x12: // Open Valve
+    {
+      Serial.println("Opening valve");
+      digitalWrite(SOLENOID_PIN, HIGH);
+      valveOpen = true;
+      valveOpenTime = millis();
+      Serial.print("Valve opened. Timeout in ");
+      Serial.print(valveTimeout);
+      Serial.println(" ms");
+      break;
+    }
+
+    case 0x13: // Close Valve
+    {
+      Serial.println("Closing valve");
+      digitalWrite(SOLENOID_PIN, LOW);
+      valveOpen = false;
+      valveOpenTime = 0;
+      break;
+    }
+
+    case 0x14: // Set Valve Timeout
+    {
+      int timeout = 0;
+      memcpy(&timeout, value.data() + 1, sizeof(int));
+      valveTimeout = timeout;
+      Serial.print("Valve timeout set to: ");
+      Serial.print(valveTimeout);
+      Serial.println(" ms");
+      break;
+    }
 
     default:
       Serial.println("Unknown feature received!");
@@ -243,13 +357,14 @@ void setup()
 
   BLE.setLocalName("Boofer-CL");
   BLE.setAdvertisedService(booferService);
-  booferService.addCharacteristic(featuresCharacteristic);
+  booferService.addCharacteristic(commandCharacteristic);
+  booferService.addCharacteristic(statusCharacteristic);
   BLE.addService(booferService);
 
   // assign event handlers for connected, disconnected to peripheral
   BLE.setEventHandler(BLEConnected, blePeripheralConnectHandler);
   BLE.setEventHandler(BLEDisconnected, blePeripheralDisconnectHandler);
-  featuresCharacteristic.setEventHandler(BLEWritten, featureCallback);
+  commandCharacteristic.setEventHandler(BLEWritten, featureCallback);
 
   // start advertising
   BLE.advertise();
@@ -267,62 +382,36 @@ void setup()
 void loop()
 {
   BLE.poll();
+  checkValveSafety();
+  checkReleaseTimer();
+  updateWarmupProcess();
   handlePressureSensor();
   if (ignitionPower)
   {
-    booferReady = true;
-    analogWrite(IGNITION_PIN, 240);
+    // Don't set booferReady here - let warmup completion control it
+    // booferReady will be set to true only when warmup completes
   }
   else
   {
     booferReady = false;
     currentIgnitionPower = 0;
     analogWrite(IGNITION_PIN, 0);
+    // Reset warmup state when turned off
+    warmupState = WARMUP_IDLE;
   }
   syncBluetoothStatus();
   syncBluetoothSettings();
 }
 
-// Warmup ignition with battery pack
+// Start non-blocking warmup process
 void warmupIgnition()
 {
-
-  for (int dutyCycle = stage1Start; dutyCycle <= stage2End; dutyCycle += 1)
-  {
-    Serial.print("Currently power at: ");
-    Serial.println(dutyCycle);
-    currentIgnitionPower = dutyCycle;
-    analogWrite(IGNITION_PIN, dutyCycle);
-    delay(stage1WI); // Adjust the delay for how quickly you ramp up
-    BLE.poll();
-    syncBluetoothStatus();
-  }
-  delay(stageDelay);
-
-  for (int dutyCycle = stage2Start; dutyCycle <= stage2End; dutyCycle += 1)
-  {
-    Serial.print("Currently power at: ");
-    Serial.println(dutyCycle);
-    currentIgnitionPower = dutyCycle;
-    analogWrite(IGNITION_PIN, dutyCycle);
-    delay(stage2WI); // Adjust the delay for how quickly you ramp up
-    BLE.poll();
-    syncBluetoothStatus();
-  }
-  delay(stageDelay);
-
-  for (int dutyCycle = stage3Start; dutyCycle <= stage3End; dutyCycle += 1)
-  {
-    Serial.print("Currently power at: ");
-    Serial.println(dutyCycle);
-    currentIgnitionPower = dutyCycle;
-    analogWrite(IGNITION_PIN, dutyCycle);
-    delay(stage3WI); // Adjust the delay for how quickly you ramp up
-    BLE.poll();
-    syncBluetoothStatus();
-  }
-
-  booferReady = true;
+  Serial.println("Starting non-blocking warmup process");
+  warmupState = WARMUP_STAGE1;
+  warmupCurrentDutyCycle = stage1Start;
+  warmupLastUpdate = millis();
+  currentIgnitionPower = warmupCurrentDutyCycle;
+  analogWrite(IGNITION_PIN, warmupCurrentDutyCycle);
 }
 
 void handlePressureSensor()
@@ -331,13 +420,6 @@ void handlePressureSensor()
   currentVoltage = (sensorValue / float(adcResolution)) * 3.3;
   pressure = ((currentVoltage - VoutMin) / (VoutMax - VoutMin)) * pressureMax;
   pressure = max(0.0f, pressure);
-  // Serial.print("Sensor Value: ");
-  // Serial.print(sensorValue);
-  // Serial.print(", Voltage: ");
-  // Serial.print(currentVoltage, 3); // Print voltage with 3 decimal places
-  // Serial.print(" V, Pressure: ");
-  // Serial.print(pressure, 2); // Print pressure with 2 decimal places
-  // Serial.println(" PSI");
 }
 
 // BLE helpers
@@ -366,13 +448,14 @@ void sendStatusUpdate()
   doc["ready"] = booferReady;
   doc["vol"] = currentVoltage;
   doc["pres"] = pressure;
+  doc["valveOpen"] = valveOpen;
   String output;
   serializeJson(doc, output);
 
   // Send the JSON string via the BLE characteristic
   Serial.print("Sending notify status: ");
   Serial.println(output.c_str());
-  featuresCharacteristic.setValue(output.c_str());
+  statusCharacteristic.setValue(output.c_str());
 }
 
 void sendConfigStatusUpdate()
@@ -392,6 +475,7 @@ void sendConfigStatusUpdate()
   doc["vmin"] = VoutMin;
   doc["vmax"] = VoutMax;
   doc["adcRes"] = adcResolution;
+  doc["valveTimeout"] = valveTimeout;
 
   String output;
   serializeJson(doc, output);
@@ -399,7 +483,7 @@ void sendConfigStatusUpdate()
   // Send the JSON string via the BLE characteristic
   Serial.print("Sending config status: ");
   Serial.println(output.c_str());
-  featuresCharacteristic.setValue(output.c_str());
+  statusCharacteristic.setValue(output.c_str());
 }
 
 void syncBluetoothStatus()
@@ -437,6 +521,12 @@ void restoreDefaults()
   stage3End = FACTORY_STAGE3_END;
   stage3WI = FACTORY_STAGE3_WARMUP;
 
+  // Restore pressure sensor calibration values
+  VoutMin = FACTORY_VMin;
+  VoutMax = FACTORY_VMax;
+  pressureMax = FACTORY_PRESSURE_MAX;
+  adcResolution = FACTORY_ADC_RES;
+
   Serial.println("Settings restored to factory defaults.");
   saveSettings();
 }
@@ -459,6 +549,7 @@ void saveSettings()
   preferences.putFloat("VoutMax", VoutMax);
   preferences.putFloat("pressureMax", pressureMax);
   preferences.putInt("adcResolution", adcResolution);
+  preferences.putInt("valveTimeout", valveTimeout);
   preferences.end();
   Serial.println("stage1WI saving: " + String(stage1WI));
   Serial.println("Settings saved!");
@@ -482,7 +573,133 @@ void loadSettings()
   VoutMax = preferences.getFloat("VoutMax", FACTORY_VMax);
   pressureMax = preferences.getFloat("pressureMax", FACTORY_PRESSURE_MAX);
   adcResolution = preferences.getInt("adcResolution", FACTORY_ADC_RES);
+  valveTimeout = preferences.getInt("valveTimeout", 5000); // Default 5 seconds
 
   preferences.end();
   Serial.println("Settings loaded!");
+}
+
+void checkValveSafety()
+{
+  if (valveOpen && (millis() - valveOpenTime > valveTimeout))
+  {
+    Serial.println("Valve timeout! Closing valve.");
+    digitalWrite(SOLENOID_PIN, LOW);
+    valveOpen = false;
+    valveOpenTime = 0;
+  }
+}
+
+void checkReleaseTimer()
+{
+  if (releaseActive)
+  {
+    unsigned long currentTime = millis();
+    if (currentTime - releaseStartTime >= releaseDuration)
+    {
+      releaseActive = false;
+      digitalWrite(SOLENOID_PIN, LOW);
+    }
+  }
+}
+
+void updateWarmupProcess()
+{
+  if (warmupState == WARMUP_IDLE)
+    return;
+
+  unsigned long currentTime = millis();
+
+  switch (warmupState)
+  {
+  case WARMUP_STAGE1:
+    if (currentTime - warmupLastUpdate >= stage1WI)
+    {
+      warmupCurrentDutyCycle++;
+      if (warmupCurrentDutyCycle <= stage1End)
+      {
+        Serial.print("Stage 1 - Power at: ");
+        Serial.println(warmupCurrentDutyCycle);
+        currentIgnitionPower = warmupCurrentDutyCycle;
+        analogWrite(IGNITION_PIN, warmupCurrentDutyCycle);
+        warmupLastUpdate = currentTime;
+      }
+      else
+      {
+        Serial.println("Stage 1 complete, starting delay");
+        warmupState = WARMUP_DELAY1;
+        warmupLastUpdate = currentTime;
+      }
+    }
+    break;
+
+  case WARMUP_DELAY1:
+    if (currentTime - warmupLastUpdate >= stageDelay)
+    {
+      Serial.println("Starting Stage 2");
+      warmupState = WARMUP_STAGE2;
+      warmupCurrentDutyCycle = stage2Start;
+      warmupLastUpdate = currentTime;
+    }
+    break;
+
+  case WARMUP_STAGE2:
+    if (currentTime - warmupLastUpdate >= stage2WI)
+    {
+      warmupCurrentDutyCycle++;
+      if (warmupCurrentDutyCycle <= stage2End)
+      {
+        Serial.print("Stage 2 - Power at: ");
+        Serial.println(warmupCurrentDutyCycle);
+        currentIgnitionPower = warmupCurrentDutyCycle;
+        analogWrite(IGNITION_PIN, warmupCurrentDutyCycle);
+        warmupLastUpdate = currentTime;
+      }
+      else
+      {
+        Serial.println("Stage 2 complete, starting delay");
+        warmupState = WARMUP_DELAY2;
+        warmupLastUpdate = currentTime;
+      }
+    }
+    break;
+
+  case WARMUP_DELAY2:
+    if (currentTime - warmupLastUpdate >= stageDelay)
+    {
+      Serial.println("Starting Stage 3");
+      warmupState = WARMUP_STAGE3;
+      warmupCurrentDutyCycle = stage3Start;
+      warmupLastUpdate = currentTime;
+    }
+    break;
+
+  case WARMUP_STAGE3:
+    if (currentTime - warmupLastUpdate >= stage3WI)
+    {
+      warmupCurrentDutyCycle++;
+      if (warmupCurrentDutyCycle <= stage3End)
+      {
+        Serial.print("Stage 3 - Power at: ");
+        Serial.println(warmupCurrentDutyCycle);
+        currentIgnitionPower = warmupCurrentDutyCycle;
+        analogWrite(IGNITION_PIN, warmupCurrentDutyCycle);
+        warmupLastUpdate = currentTime;
+      }
+      else
+      {
+        Serial.println("Warmup complete!");
+        warmupState = WARMUP_COMPLETE;
+        booferReady = true;
+      }
+    }
+    break;
+
+  case WARMUP_COMPLETE:
+    warmupState = WARMUP_IDLE;
+    break;
+
+  default:
+    break;
+  }
 }
