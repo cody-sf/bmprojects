@@ -12,7 +12,7 @@
 
 // 26 for AShton/Vinny
 // 27 for Cody/ Aleg
-#define LED_OUTPUT_PIN 26
+#define LED_OUTPUT_PIN 27
 #define NUM_LEDS 192
 #define COLOR_ORDER GRB
 
@@ -306,7 +306,7 @@ void setup()
       ;
   }
 
-  BLE.setLocalName("Backpack-AC");
+  BLE.setLocalName("Backpack-CL");
   BLE.setAdvertisedService(backpackService);
   backpackService.addCharacteristic(featuresCharacteristic);
   BLE.addService(backpackService);

@@ -1,0 +1,20 @@
+{
+  "name": "BurningManLEDs",
+  "version": "1.0.0",
+  "description": "Custom LED library for Burning Man project",
+  "authors": [
+    {
+      "name": "Cody"
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fastled/FastLED"
+    },
+    {
+      "name": "bblanchon/ArduinoJson"
+    }
+  ],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32", "espressif8266"]
+} 
