@@ -1,6 +1,7 @@
 #include "LightShow.h"
 #include <FastLED.h>
 #include "Palettes.h"
+#include <algorithm>
 
 LightShow::LightShow(const std::vector<CLEDController *> &led_controllers, const Clock &clock)
     : led_controllers_(led_controllers), clock_(clock), scene_changed_(false), hue_(0), frame_number_(0), scale_(0), palette_index_(0), palette_size_(0),
@@ -133,21 +134,21 @@ CRGBPalette16 LightShow::getPalette(AvailablePalettes palette)
     case wave:
         return wave_palette;
     // New Burning Man palettes
-    case electric_desert:
+    case electricdesert:
         return electric_desert_palette;
-    case psychedelic_playa:
+    case psychedelicplaya:
         return psychedelic_playa_palette;
-    case burning_rainbow:
+    case burningrainbow:
         return burning_rainbow_palette;
-    case neon_nights:
+    case neonnights:
         return neon_nights_palette;
-    case desert_storm:
+    case desertstorm:
         return desert_storm_palette;
-    case cosmic_fire:
+    case cosmicfire:
         return cosmic_fire_palette;
-    case alien_glow:
+    case alienglow:
         return alien_glow_palette;
-    case molten_metal:
+    case moltenmetal:
         return molten_metal_palette;
     default:
         return vga_palette; // Default or error palette
@@ -434,7 +435,7 @@ void LightShow::render()
             last_render_time_ = now;
             for (auto &controller : led_controllers_)
             {
-                controller->showColor(CRGB::Black);
+                controller->showColor(CRGB::Black, controller->size(), brightness_);
             }
         }
         break;
@@ -445,7 +446,7 @@ void LightShow::render()
             last_render_time_ = now;
             for (auto &controller : led_controllers_)
             {
-                controller->showColor(active_scene_.color, active_scene_.brightness);
+                controller->showColor(active_scene_.color, controller->size(), active_scene_.brightness);
             }
         }
         break;
@@ -519,7 +520,7 @@ void LightShow::render()
         {
             for (auto &controller : led_controllers_)
             {
-                controller->showColor(CHSV(new_hue, 255, 255), active_scene_.brightness);
+                controller->showColor(CHSV(new_hue, 255, 255), controller->size(), active_scene_.brightness);
             }
 
             hue_ = new_hue;
@@ -586,7 +587,7 @@ void LightShow::render()
                 {
                     for (auto &controller : led_controllers_)
                     {
-                        controller->showColor(CRGB::Black);
+                        controller->showColor(CRGB::Black, controller->size(), brightness_);
                     }
 
                     current_frame_duration_ = active_scene_.scenes.strobe.duration_off;
@@ -595,7 +596,7 @@ void LightShow::render()
                 {
                     for (auto &controller : led_controllers_)
                     {
-                        controller->showColor(active_scene_.scenes.strobe.color, active_scene_.brightness);
+                        controller->showColor(active_scene_.scenes.strobe.color, controller->size(), active_scene_.brightness);
                     }
 
                     current_frame_duration_ = active_scene_.scenes.strobe.duration_off;
@@ -606,7 +607,7 @@ void LightShow::render()
             {
                 for (auto &controller : led_controllers_)
                 {
-                    controller->showColor(CRGB::Black);
+                    controller->showColor(CRGB::Black, controller->size(), brightness_);
                 }
 
                 current_frame_duration_ = active_scene_.scenes.strobe.duration_between_sets;
@@ -653,7 +654,7 @@ void LightShow::render()
             CRGB new_color = from_color.lerp8(to_color, new_scale);
             for (auto &controller : led_controllers_)
             {
-                controller->showColor(new_color, active_scene_.brightness);
+                controller->showColor(new_color, controller->size(), active_scene_.brightness);
             }
 
             scale_ = new_scale;
@@ -676,6 +677,7 @@ void LightShow::render()
             controller->showLeds(active_scene_.brightness);
         }
     }
+    break;
 
     // NEW BURNING MAN EFFECTS RENDERING - SPECTACULAR LIGHT SHOWS!
     
@@ -758,7 +760,7 @@ void LightShow::render()
                 for (size_t i = 0; i < num_leds && led_idx < heat_array_size_; i++, led_idx++)
                 {
                     // Cool down
-                    heat_array_[led_idx] = max(0, (int)heat_array_[led_idx] - random(0, 10));
+                    heat_array_[led_idx] = std::max(0, (int)heat_array_[led_idx] - (int)random(0, 10));
                     
                     // Heat from neighbors (simple diffusion)
                     if (led_idx > 0 && led_idx < heat_array_size_ - 1)
@@ -769,7 +771,7 @@ void LightShow::render()
                     // Add random heat sparks
                     if (random(255) < active_scene_.scenes.fire_plasma.heat_variance)
                     {
-                        heat_array_[led_idx] = min(255, heat_array_[led_idx] + random(50, 255));
+                        heat_array_[led_idx] = std::min(255, (int)heat_array_[led_idx] + (int)random(50, 255));
                     }
                     
                     leds[i] = ColorFromPalette(current_palette, heat_array_[led_idx]);
@@ -946,7 +948,7 @@ void LightShow::render()
                         uint8_t distance = abs((int)i - (int)blob_pos);
                         if (distance < 10) // Blob radius
                         {
-                            blob_influence = max(blob_influence, 255 - (distance * 25));
+                            blob_influence = std::max((int)blob_influence, 255 - (distance * 25));
                         }
                     }
                     
@@ -999,7 +1001,7 @@ void LightShow::render()
                 // Lightning flash
                 for (auto &controller : led_controllers_)
                 {
-                    controller->showColor(CRGB::White, active_scene_.scenes.lightning_storm.flash_intensity);
+                    controller->showColor(CRGB::White, controller->size(), active_scene_.scenes.lightning_storm.flash_intensity);
                 }
                 frame_number_ = 3; // Flash duration
             }
@@ -1009,7 +1011,7 @@ void LightShow::render()
                 for (auto &controller : led_controllers_)
                 {
                     uint8_t fade_intensity = (active_scene_.scenes.lightning_storm.flash_intensity * frame_number_) / 3;
-                    controller->showColor(CRGB::White, fade_intensity);
+                    controller->showColor(CRGB::White, controller->size(), fade_intensity);
                 }
                 frame_number_--;
             }
@@ -1100,7 +1102,7 @@ void LightShow::render()
                     uint8_t arm_offset = arm_number * (256 / active_scene_.scenes.spiral_galaxy.spiral_arms);
                     
                     uint8_t spiral_intensity = sin8(spiral_position + arm_offset);
-                    uint8_t distance_fade = 255 - abs(128 - ((i * 256) / num_leds)); // Fade from center
+                    uint8_t distance_fade = 255 - abs((int)128 - (int)((i * 256) / num_leds)); // Fade from center
                     
                     uint8_t final_intensity = (spiral_intensity * distance_fade) >> 8;
                     leds[i] = ColorFromPalette(current_palette, final_intensity + hue_);
@@ -1581,8 +1583,8 @@ struct EffectNameMapEntry {
     LightSceneID id;
 };
 const EffectNameMapEntry effectNameMap[] = {
-    {"palette_stream", LightSceneID::palette_stream},
-    {"palette_cycle", LightSceneID::palette_cycle},
+    {"pstream", LightSceneID::palette_stream},
+    {"pcycle", LightSceneID::palette_cycle},
     {"pulse_wave", LightSceneID::pulse_wave},
     {"meteor_shower", LightSceneID::meteor_shower},
     {"fire_plasma", LightSceneID::fire_plasma},
@@ -1595,6 +1597,11 @@ const EffectNameMapEntry effectNameMap[] = {
     {"lightning_storm", LightSceneID::lightning_storm},
     {"color_explosion", LightSceneID::color_explosion},
     {"spiral_galaxy", LightSceneID::spiral_galaxy},
+    {"cradial", LightSceneID::color_radial},
+    {"cwheel", LightSceneID::color_wheel},
+    {"speedo", LightSceneID::speedometer},
+    {"pstat", LightSceneID::position_status},
+    {"off", LightSceneID::off},
     // Add more as needed
 };
 const int effectNameMapSize = sizeof(effectNameMap) / sizeof(effectNameMap[0]);
@@ -1605,40 +1612,75 @@ struct PaletteNameMapEntry {
 };
 const PaletteNameMapEntry paletteNameMap[] = {
     {"candy", AvailablePalettes::candy},
+    {"candyPalette", AvailablePalettes::candy},
     {"cool", AvailablePalettes::cool},
+    {"coolPalette", AvailablePalettes::cool},
     {"cosmicwaves", AvailablePalettes::cosmicwaves},
+    {"cosmicwavesPalette", AvailablePalettes::cosmicwaves},
     {"earth", AvailablePalettes::earth},
+    {"earthPalette", AvailablePalettes::earth},
     {"eblossom", AvailablePalettes::eblossom},
+    {"eblossomPalette", AvailablePalettes::eblossom},
     {"emerald", AvailablePalettes::emerald},
+    {"emeraldPalette", AvailablePalettes::emerald},
     {"everglow", AvailablePalettes::everglow},
+    {"everglowPalette", AvailablePalettes::everglow},
     {"fatboy", AvailablePalettes::fatboy},
+    {"fatboyPalette", AvailablePalettes::fatboy},
     {"fireice", AvailablePalettes::fireice},
+    {"fireicePalette", AvailablePalettes::fireice},
     {"fireynight", AvailablePalettes::fireynight},
+    {"fireynightPalette", AvailablePalettes::fireynight},
     {"flame", AvailablePalettes::flame},
+    {"flamePalette", AvailablePalettes::flame},
     {"heart", AvailablePalettes::heart},
+    {"heartPalette", AvailablePalettes::heart},
     {"lava", AvailablePalettes::lava},
+    {"lavaPalette", AvailablePalettes::lava},
     {"meadow", AvailablePalettes::meadow},
+    {"meadowPalette", AvailablePalettes::meadow},
     {"melonball", AvailablePalettes::melonball},
+    {"melonballPalette", AvailablePalettes::melonball},
     {"nebula", AvailablePalettes::nebula},
+    {"nebulaPalette", AvailablePalettes::nebula},
     {"oasis", AvailablePalettes::oasis},
+    {"oasisPalette", AvailablePalettes::oasis},
     {"pinksplash", AvailablePalettes::pinksplash},
+    {"pinksplashPalette", AvailablePalettes::pinksplash},
     {"r", AvailablePalettes::r},
+    {"rPalette", AvailablePalettes::r},
     {"sofia", AvailablePalettes::sofia},
+    {"sofiaPalette", AvailablePalettes::sofia},
     {"sunset", AvailablePalettes::sunset},
+    {"sunsetPalette", AvailablePalettes::sunset},
     {"sunsetfusion", AvailablePalettes::sunsetfusion},
+    {"sunsetfusionPalette", AvailablePalettes::sunsetfusion},
     {"trove", AvailablePalettes::trove},
+    {"trovePalette", AvailablePalettes::trove},
     {"vivid", AvailablePalettes::vivid},
+    {"vividPalette", AvailablePalettes::vivid},
     {"velvet", AvailablePalettes::velvet},
+    {"velvetPalette", AvailablePalettes::velvet},
     {"vga", AvailablePalettes::vga},
+    {"vgaPalette", AvailablePalettes::vga},
     {"wave", AvailablePalettes::wave},
-    {"electric_desert", AvailablePalettes::electric_desert},
-    {"psychedelic_playa", AvailablePalettes::psychedelic_playa},
-    {"burning_rainbow", AvailablePalettes::burning_rainbow},
-    {"neon_nights", AvailablePalettes::neon_nights},
-    {"desert_storm", AvailablePalettes::desert_storm},
-    {"cosmic_fire", AvailablePalettes::cosmic_fire},
-    {"alien_glow", AvailablePalettes::alien_glow},
-    {"molten_metal", AvailablePalettes::molten_metal},
+    {"wavePalette", AvailablePalettes::wave},
+    {"electricdesert", AvailablePalettes::electricdesert},
+    {"electricDesertPalette", AvailablePalettes::electricdesert},
+    {"psychedelicplaya", AvailablePalettes::psychedelicplaya},
+    {"psychedelicPlayaPalette", AvailablePalettes::psychedelicplaya},
+    {"burningrainbow", AvailablePalettes::burningrainbow},
+    {"burningRainbowPalette", AvailablePalettes::burningrainbow},
+    {"neonnights", AvailablePalettes::neonnights},
+    {"neonNightsPalette", AvailablePalettes::neonnights},
+    {"desertstorm", AvailablePalettes::desertstorm},
+    {"desertStormPalette", AvailablePalettes::desertstorm},
+    {"cosmicfire", AvailablePalettes::cosmicfire},
+    {"cosmicFirePalette", AvailablePalettes::cosmicfire},
+    {"alienglow", AvailablePalettes::alienglow},
+    {"alienGlowPalette", AvailablePalettes::alienglow},
+    {"moltenmetal", AvailablePalettes::moltenmetal},
+    {"moltenMetalPalette", AvailablePalettes::moltenmetal},
     // Add more as needed
 };
 const int paletteNameMapSize = sizeof(paletteNameMap) / sizeof(paletteNameMap[0]);

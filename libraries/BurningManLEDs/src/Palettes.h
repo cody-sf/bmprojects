@@ -616,4 +616,122 @@ DEFINE_GRADIENT_PALETTE(meadow_palette){
 
 CRGBPalette16 meadowPalette = meadow_palette;
 
+// NEW BURNING MAN PALETTES - MODERN AND SPECTACULAR!
+
+// Electric Desert - inspired by the playa at night
+DEFINE_GRADIENT_PALETTE(electric_desert_palette){
+    0, 255, 120, 0,    // Bright Orange
+    32, 255, 40, 120,  // Hot Pink
+    64, 120, 0, 255,   // Electric Blue
+    96, 0, 255, 200,   // Cyan
+    128, 255, 255, 0,  // Yellow
+    160, 255, 0, 100,  // Magenta
+    192, 0, 120, 255,  // Blue
+    224, 255, 60, 0,   // Orange-Red
+    255, 255, 120, 0   // Back to Orange
+};
+CRGBPalette16 electricDesertPalette = electric_desert_palette;
+
+// Psychedelic Playa - wild color combinations
+DEFINE_GRADIENT_PALETTE(psychedelic_playa_palette){
+    0, 255, 0, 255,    // Magenta
+    21, 0, 255, 0,     // Green
+    42, 255, 255, 0,   // Yellow
+    63, 0, 0, 255,     // Blue
+    84, 255, 128, 0,   // Orange
+    105, 128, 0, 255,  // Purple
+    126, 0, 255, 128,  // Teal
+    147, 255, 0, 128,  // Pink
+    168, 128, 255, 0,  // Lime
+    189, 0, 128, 255,  // Sky Blue
+    210, 255, 64, 192, // Coral
+    231, 64, 255, 64,  // Mint
+    252, 192, 64, 255, // Lavender
+    255, 255, 0, 255   // Back to Magenta
+};
+CRGBPalette16 psychedelicPlayaPalette = psychedelic_playa_palette;
+
+// Burning Rainbow - intense saturated colors
+DEFINE_GRADIENT_PALETTE(burning_rainbow_palette){
+    0, 255, 0, 0,      // Red
+    36, 255, 165, 0,   // Orange
+    72, 255, 255, 0,   // Yellow
+    108, 0, 255, 0,    // Green
+    144, 0, 0, 255,    // Blue
+    180, 75, 0, 130,   // Indigo
+    216, 238, 130, 238, // Violet
+    255, 255, 0, 0     // Back to Red
+};
+CRGBPalette16 burningRainbowPalette = burning_rainbow_palette;
+
+// Neon Nights - cyberpunk inspired
+DEFINE_GRADIENT_PALETTE(neon_nights_palette){
+    0, 255, 0, 150,    // Pink Neon
+    32, 0, 255, 255,   // Cyan Neon
+    64, 150, 0, 255,   // Purple Neon
+    96, 255, 255, 0,   // Yellow Neon
+    128, 255, 50, 0,   // Orange Neon
+    160, 0, 255, 100,  // Green Neon
+    192, 100, 100, 255, // Blue Neon
+    224, 255, 0, 200,  // Magenta Neon
+    255, 255, 0, 150   // Back to Pink
+};
+CRGBPalette16 neonNightsPalette = neon_nights_palette;
+
+// Desert Storm - dust and lightning colors
+DEFINE_GRADIENT_PALETTE(desert_storm_palette){
+    0, 139, 69, 19,    // Saddle Brown (dust)
+    32, 255, 215, 0,   // Gold (lightning)
+    64, 105, 105, 105, // Dim Gray (storm clouds)
+    96, 255, 255, 224, // Light Yellow (lightning flash)
+    128, 160, 82, 45,  // Saddle Brown (more dust)
+    160, 255, 140, 0,  // Dark Orange (sunset through dust)
+    192, 128, 128, 128, // Gray (storm)
+    224, 255, 215, 0,  // Gold (more lightning)
+    255, 139, 69, 19   // Back to dust
+};
+CRGBPalette16 desertStormPalette = desert_storm_palette;
+
+// Cosmic Fire - space and fire combined
+DEFINE_GRADIENT_PALETTE(cosmic_fire_palette){
+    0, 0, 0, 128,      // Dark Navy (space)
+    25, 25, 25, 112,   // Midnight Blue
+    50, 255, 69, 0,    // Red-Orange (fire)
+    75, 255, 140, 0,   // Dark Orange
+    100, 255, 215, 0,  // Gold (bright fire)
+    125, 255, 255, 255, // White (hottest fire)
+    150, 255, 215, 0,  // Gold
+    175, 255, 140, 0,  // Dark Orange
+    200, 255, 69, 0,   // Red-Orange
+    225, 25, 25, 112,  // Midnight Blue
+    255, 0, 0, 128     // Back to Dark Navy
+};
+CRGBPalette16 cosmicFirePalette = cosmic_fire_palette;
+
+// Alien Glow - otherworldly colors
+DEFINE_GRADIENT_PALETTE(alien_glow_palette){
+    0, 173, 255, 47,   // Green Yellow
+    42, 0, 255, 127,   // Spring Green
+    84, 102, 205, 170, // Medium Aquamarine
+    126, 64, 224, 208, // Turquoise
+    168, 0, 191, 255,  // Deep Sky Blue
+    210, 138, 43, 226, // Blue Violet
+    255, 173, 255, 47  // Back to Green Yellow
+};
+CRGBPalette16 alienGlowPalette = alien_glow_palette;
+
+// Molten Metal - hot metal colors
+DEFINE_GRADIENT_PALETTE(molten_metal_palette){
+    0, 25, 25, 25,     // Almost Black (cold metal)
+    32, 139, 0, 0,     // Dark Red (heating up)
+    64, 255, 69, 0,    // Red Orange (hot)
+    96, 255, 140, 0,   // Dark Orange (hotter)
+    128, 255, 215, 0,  // Gold (very hot)
+    160, 255, 255, 224, // Light Yellow (molten)
+    192, 255, 255, 255, // White (hottest)
+    224, 255, 215, 0,  // Gold (cooling)
+    255, 25, 25, 25    // Back to cold
+};
+CRGBPalette16 moltenMetalPalette = molten_metal_palette;
+
 #endif
