@@ -30,6 +30,15 @@
 #define BLE_FEATURE_SPIRAL_ARMS 0x18
 #define BLE_FEATURE_COLOR 0x19
 
+// Defaults Management Features
+#define BLE_FEATURE_GET_DEFAULTS 0x1A
+#define BLE_FEATURE_SET_DEFAULTS 0x1B
+#define BLE_FEATURE_SAVE_CURRENT_AS_DEFAULTS 0x1C
+#define BLE_FEATURE_RESET_TO_FACTORY 0x1D
+#define BLE_FEATURE_SET_MAX_BRIGHTNESS 0x1E
+#define BLE_FEATURE_SET_DEVICE_OWNER 0x1F
+#define BLE_FEATURE_SET_AUTO_ON 0x20
+
 class BMBluetoothHandler {
 public:
     BMBluetoothHandler(const char* deviceName, const char* serviceUUID, 

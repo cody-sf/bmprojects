@@ -12,6 +12,7 @@
 
 #include "BMDeviceState.h"
 #include "BMBluetoothHandler.h"
+#include "BMDeviceDefaults.h"
 
 #define DEFAULT_BT_REFRESH_INTERVAL 5000
 #define DEFAULT_GPS_BAUD 9600
@@ -45,12 +46,21 @@ public:
     LightShow& getLightShow() { return lightShow_; }
     BMBluetoothHandler& getBluetoothHandler() { return bluetoothHandler_; }
     LocationService* getLocationService() { return locationService_; }
+    BMDeviceDefaults& getDefaults() { return defaults_; }
     
     // Configuration
     void setStatusUpdateInterval(unsigned long interval) { statusUpdateInterval_ = interval; }
     void setBrightness(int brightness);
     void setEffect(LightSceneID effect);
     void setPalette(AvailablePalettes palette);
+    
+    // Defaults management
+    bool loadDefaults();
+    bool saveCurrentAsDefaults();
+    bool resetToFactoryDefaults();
+    void applyDefaults();
+    void setMaxBrightness(int maxBrightness);
+    void setDeviceOwner(const String& owner);
     
     // Callbacks for custom behavior
     void setCustomFeatureHandler(std::function<bool(uint8_t feature, const uint8_t* data, size_t length)> handler);
@@ -62,6 +72,7 @@ private:
     BMBluetoothHandler bluetoothHandler_;
     LightShow lightShow_;
     Clock deviceClock_;
+    BMDeviceDefaults defaults_;
     
     // GPS components (optional)
     bool gpsEnabled_;
@@ -95,6 +106,15 @@ private:
     void handleEffectFeature(const uint8_t* buffer, size_t length);
     void handleEffectParameterFeature(uint8_t feature, const uint8_t* buffer, size_t length);
     void handleColorFeature(const uint8_t* buffer, size_t length);
+    
+    // Defaults feature handlers
+    void handleGetDefaultsFeature(const uint8_t* buffer, size_t length);
+    void handleSetDefaultsFeature(const uint8_t* buffer, size_t length);
+    void handleSaveCurrentAsDefaultsFeature(const uint8_t* buffer, size_t length);
+    void handleResetToFactoryFeature(const uint8_t* buffer, size_t length);
+    void handleSetMaxBrightnessFeature(const uint8_t* buffer, size_t length);
+    void handleSetDeviceOwnerFeature(const uint8_t* buffer, size_t length);
+    void handleSetAutoOnFeature(const uint8_t* buffer, size_t length);
 };
 
 #endif // BM_DEVICE_H 

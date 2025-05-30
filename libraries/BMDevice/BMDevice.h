@@ -5,6 +5,7 @@
 #include "src/BMDevice.h"
 #include "src/BMDeviceState.h"
 #include "src/BMBluetoothHandler.h"
+#include "src/BMDeviceDefaults.h"
 
 // Re-export key dependencies for convenience
 #include <FastLED.h>

@@ -1,0 +1,129 @@
+#ifndef BM_DEVICE_DEFAULTS_H
+#define BM_DEVICE_DEFAULTS_H
+
+#include <Arduino.h>
+#include <Preferences.h>
+#include <ArduinoJson.h>
+#include <FastLED.h>
+#include <LightShow.h>
+
+#define DEFAULTS_NAMESPACE "bmdefaults"
+#define DEFAULTS_VERSION 1
+
+// Default setting keys
+#define PREF_BRIGHTNESS "brightness"
+#define PREF_MAX_BRIGHTNESS "maxBrightness"
+#define PREF_SPEED "speed"
+#define PREF_PALETTE "palette"
+#define PREF_EFFECT "effect"
+#define PREF_DIRECTION "direction"
+#define PREF_OWNER "owner"
+#define PREF_DEVICE_NAME "deviceName"
+#define PREF_AUTO_ON "autoOn"
+#define PREF_STATUS_INTERVAL "statusInterval"
+#define PREF_EFFECT_COLOR_R "effectColorR"
+#define PREF_EFFECT_COLOR_G "effectColorG"
+#define PREF_EFFECT_COLOR_B "effectColorB"
+#define PREF_GPS_ENABLED "gpsEnabled"
+#define PREF_VERSION "version"
+
+struct DeviceDefaults {
+    // Core settings
+    int brightness;
+    int maxBrightness;
+    int speed;
+    AvailablePalettes palette;
+    LightSceneID effect;
+    bool reverseDirection;
+    
+    // Device identity
+    String owner;
+    String deviceName;
+    
+    // Behavior settings
+    bool autoOn;
+    unsigned long statusUpdateInterval;
+    CRGB effectColor;
+    bool gpsEnabled;
+    
+    // Version for migration
+    int version;
+    
+    DeviceDefaults() {
+        setFactoryDefaults();
+    }
+    
+    void setFactoryDefaults() {
+        brightness = 50;
+        maxBrightness = 100;
+        speed = 100;
+        palette = AvailablePalettes::cool;
+        effect = LightSceneID::palette_stream;
+        reverseDirection = true;
+        owner = "Unknown";
+        deviceName = "BMDevice";
+        autoOn = true;
+        statusUpdateInterval = 5000;
+        effectColor = CRGB::Green;
+        gpsEnabled = false;
+        version = DEFAULTS_VERSION;
+    }
+};
+
+class BMDeviceDefaults {
+public:
+    BMDeviceDefaults();
+    ~BMDeviceDefaults();
+    
+    // Lifecycle
+    bool begin();
+    void end();
+    
+    // Load/Save operations
+    bool loadDefaults(DeviceDefaults& defaults);
+    bool saveDefaults(const DeviceDefaults& defaults);
+    bool resetToFactory();
+    
+    // Individual setting operations
+    bool setBrightness(int brightness);
+    bool setMaxBrightness(int maxBrightness);
+    bool setSpeed(int speed);
+    bool setPalette(AvailablePalettes palette);
+    bool setEffect(LightSceneID effect);
+    bool setDirection(bool reverse);
+    bool setOwner(const String& owner);
+    bool setDeviceName(const String& name);
+    bool setAutoOn(bool autoOn);
+    bool setStatusInterval(unsigned long interval);
+    bool setEffectColor(CRGB color);
+    bool setGPSEnabled(bool enabled);
+    
+    // Get current defaults
+    DeviceDefaults getCurrentDefaults();
+    
+    // JSON operations
+    String defaultsToJSON() const;
+    bool defaultsFromJSON(const String& json);
+    
+    // Validation
+    bool validateDefaults(const DeviceDefaults& defaults);
+    
+    // Migration
+    bool migrateIfNeeded();
+    
+    // Status
+    bool hasValidDefaults();
+    void printCurrentDefaults();
+    
+private:
+    Preferences preferences_;
+    DeviceDefaults currentDefaults_;
+    bool initialized_;
+    
+    // Helper methods
+    void constrainValues(DeviceDefaults& defaults);
+    bool writeString(const char* key, const String& value);
+    String readString(const char* key, const String& defaultValue = "");
+};
+
+#endif // BM_DEVICE_DEFAULTS_H 

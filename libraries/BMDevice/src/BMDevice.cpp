@@ -53,12 +53,25 @@ bool BMDevice::begin() {
     Serial.begin(115200);
     delay(2000);
     
+    // Initialize defaults system
+    if (!defaults_.begin()) {
+        Serial.println("[BMDevice] Failed to initialize defaults!");
+        return false;
+    }
+    
+    // Load and apply defaults
+    if (loadDefaults()) {
+        Serial.println("[BMDevice] Loaded and applied defaults");
+    } else {
+        Serial.println("[BMDevice] Using factory defaults");
+    }
+    
     // Initialize Bluetooth
     if (!bluetoothHandler_.begin()) {
         return false;
     }
     
-    // Set initial brightness
+    // Set initial brightness (may be overridden by defaults)
     lightShow_.brightness(deviceState_.brightness * 2.55);
     
     // Update light show with initial state
@@ -94,8 +107,8 @@ void BMDevice::loop() {
 }
 
 void BMDevice::setBrightness(int brightness) {
-    deviceState_.brightness = constrain(brightness, 1, 100);
-    lightShow_.brightness(deviceState_.brightness * 2.55);
+    deviceState_.brightness = constrain(brightness, 1, 255);
+    lightShow_.brightness(deviceState_.brightness);
 }
 
 void BMDevice::setEffect(LightSceneID effect) {
@@ -164,6 +177,30 @@ void BMDevice::handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size
         case BLE_FEATURE_SPIRAL_ARMS:
             handleEffectParameterFeature(feature, buffer, length);
             break;
+        
+        // Defaults Management Features
+        case BLE_FEATURE_GET_DEFAULTS:
+            handleGetDefaultsFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_DEFAULTS:
+            handleSetDefaultsFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SAVE_CURRENT_AS_DEFAULTS:
+            handleSaveCurrentAsDefaultsFeature(buffer, length);
+            break;
+        case BLE_FEATURE_RESET_TO_FACTORY:
+            handleResetToFactoryFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_MAX_BRIGHTNESS:
+            handleSetMaxBrightnessFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_DEVICE_OWNER:
+            handleSetDeviceOwnerFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_AUTO_ON:
+            handleSetAutoOnFeature(buffer, length);
+            break;
+            
         default:
             Serial.print("[BMDevice] Unknown feature: 0x");
             Serial.println(feature, HEX);
@@ -256,7 +293,48 @@ void BMDevice::updateLightShow() {
 }
 
 void BMDevice::sendStatusUpdate() {
-    String status = deviceState_.toJSON();
+    // Get current defaults for additional status info
+    DeviceDefaults defaults = defaults_.getCurrentDefaults();
+    
+    // Start with the basic device state JSON
+    StaticJsonDocument<768> doc;
+    
+    // Basic device state
+    doc["pwr"] = deviceState_.power;
+    doc["bri"] = deviceState_.brightness;
+    doc["spd"] = deviceState_.speed;
+    doc["dir"] = deviceState_.reverseStrip;
+    
+    const char* effectName = LightShow::effectIdToName(deviceState_.currentEffect);
+    Serial.print("[BMDevice] sendStatusUpdate: Current effect ID: ");
+    Serial.print((uint8_t)deviceState_.currentEffect);
+    Serial.print(" (");
+    Serial.print(effectName);
+    Serial.println(")");
+    
+    doc["fx"] = effectName;
+    doc["pal"] = LightShow::paletteIdToName(deviceState_.currentPalette);
+    
+    // GPS/Position data
+    doc["posAvail"] = deviceState_.positionAvailable;
+    doc["spdCur"] = deviceState_.currentSpeed;
+    
+    if (deviceState_.positionAvailable) {
+        Position& currentPos = const_cast<Position&>(deviceState_.currentPosition);
+        JsonObject posObj = doc.createNestedObject("pos");
+        posObj["lat"] = currentPos.latitude();
+        posObj["lon"] = currentPos.longitude();
+    }
+    
+    // Add defaults information
+    doc["maxBri"] = defaults.maxBrightness;
+    doc["owner"] = defaults.owner;
+    doc["deviceName"] = defaults.deviceName;
+    
+    String status;
+    serializeJson(doc, status);
+    Serial.print("[BMDevice] sendStatusUpdate: Sending status: ");
+    Serial.println(status);
     bluetoothHandler_.sendStatusUpdate(status);
 }
 
@@ -337,6 +415,8 @@ void BMDevice::handleEffectFeature(const uint8_t* buffer, size_t length) {
         if (length == 2) { // ID
             uint8_t effectId = buffer[1];
             if (effectId <= (uint8_t)LightSceneID::spiral_galaxy) {
+                Serial.print("[BMDevice] handleEffectFeature: Received effect ID: ");
+                Serial.println(effectId);
                 setEffect((LightSceneID)effectId);
                 Serial.print("[BMDevice] Effect set to ID: ");
                 Serial.println(effectId);
@@ -344,7 +424,17 @@ void BMDevice::handleEffectFeature(const uint8_t* buffer, size_t length) {
         } else { // String
             char effectStr[32] = {0};
             memcpy(effectStr, buffer + 1, min(length - 1, sizeof(effectStr) - 1));
+            Serial.print("[BMDevice] handleEffectFeature: Received effect string: '");
+            Serial.print(effectStr);
+            Serial.println("'");
+            
             LightSceneID effect = LightShow::effectNameToId(effectStr);
+            Serial.print("[BMDevice] handleEffectFeature: Converted to effect ID: ");
+            Serial.print((uint8_t)effect);
+            Serial.print(" (");
+            Serial.print(LightShow::effectIdToName(effect));
+            Serial.println(")");
+            
             setEffect(effect);
             Serial.print("[BMDevice] Effect set to: ");
             Serial.println(effectStr);
@@ -387,5 +477,171 @@ void BMDevice::handleColorFeature(const uint8_t* buffer, size_t length) {
         Serial.print(r); Serial.print(","); Serial.print(g); Serial.print(","); Serial.print(b);
         Serial.println(")");
         updateLightShow();
+    }
+}
+
+// Defaults Management Methods
+bool BMDevice::loadDefaults() {
+    DeviceDefaults defaults = defaults_.getCurrentDefaults();
+    applyDefaults();
+    return true;
+}
+
+bool BMDevice::saveCurrentAsDefaults() {
+    DeviceDefaults newDefaults;
+    
+    // Copy current state to defaults
+    newDefaults.brightness = deviceState_.brightness;
+    newDefaults.speed = deviceState_.speed;
+    newDefaults.palette = deviceState_.currentPalette;
+    newDefaults.effect = deviceState_.currentEffect;
+    newDefaults.reverseDirection = deviceState_.reverseStrip;
+    newDefaults.effectColor = deviceState_.effectColor;
+    
+    // Keep existing identity and behavior settings
+    DeviceDefaults currentDefaults = defaults_.getCurrentDefaults();
+    newDefaults.maxBrightness = currentDefaults.maxBrightness;
+    newDefaults.owner = currentDefaults.owner;
+    newDefaults.deviceName = currentDefaults.deviceName;
+    newDefaults.autoOn = currentDefaults.autoOn;
+    newDefaults.statusUpdateInterval = currentDefaults.statusUpdateInterval;
+    newDefaults.gpsEnabled = currentDefaults.gpsEnabled;
+    newDefaults.version = currentDefaults.version;
+    
+    bool success = defaults_.saveDefaults(newDefaults);
+    if (success) {
+        Serial.println("[BMDevice] Current state saved as defaults");
+    } else {
+        Serial.println("[BMDevice] Failed to save current state as defaults");
+    }
+    
+    return success;
+}
+
+bool BMDevice::resetToFactoryDefaults() {
+    bool success = defaults_.resetToFactory();
+    if (success) {
+        applyDefaults();
+        Serial.println("[BMDevice] Reset to factory defaults and applied");
+    } else {
+        Serial.println("[BMDevice] Failed to reset to factory defaults");
+    }
+    return success;
+}
+
+void BMDevice::applyDefaults() {
+    DeviceDefaults defaults = defaults_.getCurrentDefaults();
+    
+    // Apply defaults to current state
+    setBrightness(defaults.brightness);
+    setEffect(defaults.effect);
+    setPalette(defaults.palette);
+    deviceState_.speed = defaults.speed;
+    deviceState_.reverseStrip = defaults.reverseDirection;
+    deviceState_.effectColor = defaults.effectColor;
+    deviceState_.power = defaults.autoOn;
+    
+    // Apply status update interval
+    statusUpdateInterval_ = defaults.statusUpdateInterval;
+    
+    // Update light show
+    updateLightShow();
+    
+    Serial.println("[BMDevice] Applied defaults to current state");
+}
+
+void BMDevice::setMaxBrightness(int maxBrightness) {
+    bool success = defaults_.setMaxBrightness(maxBrightness);
+    if (success) {
+        // If current brightness exceeds new max, adjust it
+        DeviceDefaults currentDefaults = defaults_.getCurrentDefaults();
+        if (deviceState_.brightness > currentDefaults.maxBrightness) {
+            setBrightness(currentDefaults.maxBrightness);
+        }
+        Serial.print("[BMDevice] Max brightness set to: ");
+        Serial.println(currentDefaults.maxBrightness);
+    }
+}
+
+void BMDevice::setDeviceOwner(const String& owner) {
+    bool success = defaults_.setOwner(owner);
+    if (success) {
+        Serial.print("[BMDevice] Device owner set to: ");
+        Serial.println(owner);
+    }
+}
+
+// Defaults Feature Handlers
+void BMDevice::handleGetDefaultsFeature(const uint8_t* buffer, size_t length) {
+    String defaultsJson = defaults_.defaultsToJSON();
+    
+    // Send as status notification (you might want a separate characteristic for this)
+    bluetoothHandler_.sendStatusUpdate(defaultsJson);
+    
+    Serial.println("[BMDevice] Sent defaults over BLE");
+    Serial.print("Defaults JSON: ");
+    Serial.println(defaultsJson);
+}
+
+void BMDevice::handleSetDefaultsFeature(const uint8_t* buffer, size_t length) {
+    if (length > 1) {
+        char jsonStr[1024] = {0};
+        size_t jsonLength = min(length - 1, sizeof(jsonStr) - 1);
+        memcpy(jsonStr, buffer + 1, jsonLength);
+        
+        bool success = defaults_.defaultsFromJSON(String(jsonStr));
+        if (success) {
+            Serial.println("[BMDevice] Defaults updated from JSON");
+        } else {
+            Serial.println("[BMDevice] Failed to update defaults from JSON");
+        }
+    }
+}
+
+void BMDevice::handleSaveCurrentAsDefaultsFeature(const uint8_t* buffer, size_t length) {
+    bool success = saveCurrentAsDefaults();
+    
+    // Send confirmation via status
+    String response = success ? "{\"defaultsSaved\":true}" : "{\"defaultsSaved\":false}";
+    bluetoothHandler_.sendStatusUpdate(response);
+    
+    Serial.println(success ? "[BMDevice] Current state saved as defaults" : "[BMDevice] Failed to save current state as defaults");
+}
+
+void BMDevice::handleResetToFactoryFeature(const uint8_t* buffer, size_t length) {
+    bool success = resetToFactoryDefaults();
+    
+    // Send confirmation via status
+    String response = success ? "{\"factoryReset\":true}" : "{\"factoryReset\":false}";
+    bluetoothHandler_.sendStatusUpdate(response);
+    
+    Serial.println(success ? "[BMDevice] Reset to factory defaults" : "[BMDevice] Failed to reset to factory defaults");
+}
+
+void BMDevice::handleSetMaxBrightnessFeature(const uint8_t* buffer, size_t length) {
+    if (length >= 5) {
+        int maxBrightness = 0;
+        memcpy(&maxBrightness, buffer + 1, sizeof(int));
+        setMaxBrightness(maxBrightness);
+    }
+}
+
+void BMDevice::handleSetDeviceOwnerFeature(const uint8_t* buffer, size_t length) {
+    if (length > 1) {
+        char ownerStr[33] = {0};
+        size_t ownerLength = min(length - 1, sizeof(ownerStr) - 1);
+        memcpy(ownerStr, buffer + 1, ownerLength);
+        setDeviceOwner(String(ownerStr));
+    }
+}
+
+void BMDevice::handleSetAutoOnFeature(const uint8_t* buffer, size_t length) {
+    if (length >= 2) {
+        bool autoOn = buffer[1] != 0;
+        bool success = defaults_.setAutoOn(autoOn);
+        if (success) {
+            Serial.print("[BMDevice] Auto-on set to: ");
+            Serial.println(autoOn ? "true" : "false");
+        }
     }
 } 
