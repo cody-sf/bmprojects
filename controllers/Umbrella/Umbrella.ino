@@ -56,6 +56,7 @@ static CLEDController &led_controller_1 = FastLED.addLeds<LED_TYPE, 13, COLOR_OR
 static CLEDController &led_controller_2 = FastLED.addLeds<LED_TYPE, 12, COLOR_ORDER>(leds[1], LEDS_PER_STRIP);
 static CLEDController &led_controller_3 = FastLED.addLeds<LED_TYPE, 14, COLOR_ORDER>(leds[2], LEDS_PER_STRIP);
 static CLEDController &led_controller_4 = FastLED.addLeds<LED_TYPE, 27, COLOR_ORDER>(leds[3], LEDS_PER_STRIP);
+// Change 16 to 5 for printed board
 static CLEDController &led_controller_5 = FastLED.addLeds<LED_TYPE, 16, COLOR_ORDER>(leds[4], LEDS_PER_STRIP);
 static CLEDController &led_controller_6 = FastLED.addLeds<LED_TYPE, 25, COLOR_ORDER>(leds[5], LEDS_PER_STRIP);
 static CLEDController &led_controller_7 = FastLED.addLeds<LED_TYPE, 33, COLOR_ORDER>(leds[6], LEDS_PER_STRIP);

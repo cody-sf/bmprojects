@@ -1,9 +1,12 @@
 #include <BMDevice.h>
 
 // LED Configuration - From original BTCowboyHat.ino
-// Xiao ESP32c3 - D7 pin for LED output
-#define LED_PIN D7
-#define NUM_LEDS 350
+// Xiao ESP32-C6 - GPIO17 pin (D7) for LED output
+// Xiao ESP32 C3 = D7
+// ESP32 C6 = 7
+#define LED_PIN 17
+// #define NUM_LEDS 350
+#define NUM_LEDS 600
 #define COLOR_ORDER GRB
 
 // BLE Configuration - Using original service UUID and new status UUID
@@ -15,7 +18,7 @@
 CRGB leds[NUM_LEDS];
 
 // Create BMDevice - CowboyHat with no GPS support
-BMDevice device("CowboyHat-AY", SERVICE_UUID, FEATURES_UUID, STATUS_UUID);
+BMDevice device("CowboyHat-CL", SERVICE_UUID, FEATURES_UUID, STATUS_UUID);
 
 void setup() {
     Serial.begin(115200);

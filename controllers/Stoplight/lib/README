@@ -1,0 +1,29 @@
+This directory is intended for project specific (private) libraries.
+PlatformIO will compile them to static libraries and link into executable file.
+
+The source code of each library should be placed in a separate sub-directory
+("lib/your_library_name/[here are source files]").
+
+For example, see a structure of the following two libraries `Foo` and `Bar`:
+
+|--lib
+|  |
+|  |--Bar
+|  |  |--docs
+|  |  |--examples
+|  |  |--src
+|  |     |- Bar.c
+|  |     |- Bar.h
+|  |  |- library.json (optional, custom build options, etc) https://docs.platformio.org/page/librarymanager/config.html
+|  |
+|  |--Foo
+|  |  |- Foo.c
+|  |  |- Foo.h
+|  |
+|  |- README --> THIS FILE
+|
+|- platformio.ini
+|--src
+   |- main.c
+
+And then in source files (#include "Foo.h" or #include "Bar.h") or use library manager to install 3rd party libraries. 

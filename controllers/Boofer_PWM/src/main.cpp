@@ -3,7 +3,6 @@
 #include <ArduinoBLE.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
-#include "Helpers.h"
 
 // Forward declarations
 void warmupIgnition();
