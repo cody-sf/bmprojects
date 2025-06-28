@@ -250,10 +250,10 @@ void setup()
   }
 
   // Set device name BEFORE setting up services
-  BLE.setLocalName("Stoplight-CL");
-  BLE.setDeviceName("Stoplight-CL");
+  BLE.setLocalName("Stoplight-XX");
+  BLE.setDeviceName("Stoplight-XX");
   
-  Serial.println("BLE Name set to: Stoplight-CL");
+  Serial.println("BLE Name set to: Stoplight-XX");
 
   // Set up the service and characteristics
   BLE.setAdvertisedService(stoplightService);
@@ -269,7 +269,7 @@ void setup()
   // start advertising
   BLE.advertise();
   
-  Serial.println("BLE advertising started with name: Stoplight-CL");
+  Serial.println("BLE advertising started with name: Stoplight-XX");
   Serial.print("Service UUID: ");
   Serial.println(SERVICE_UUID);
 
