@@ -18,7 +18,7 @@
 CRGB leds[NUM_LEDS];
 
 // Create BMDevice - CowboyHat with no GPS support
-BMDevice device("CowboyHat-CL", SERVICE_UUID, FEATURES_UUID, STATUS_UUID);
+BMDevice device("CowboyHat-AY", SERVICE_UUID, FEATURES_UUID, STATUS_UUID);
 
 void setup() {
     Serial.begin(115200);

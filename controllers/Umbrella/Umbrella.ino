@@ -5,7 +5,7 @@
 #include <DeviceRoles.h>
 #include <ArduinoBLE.h>
 #include "Helpers.h"
-#include "SyncController.h"
+// #include "SyncController.h"
 #include <driver/i2s.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
