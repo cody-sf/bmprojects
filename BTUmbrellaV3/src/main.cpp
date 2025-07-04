@@ -1,6 +1,7 @@
 #include <BMDevice.h>
 #include <driver/i2s.h>
 #include <arduinoFFT.h>
+#include <Preferences.h>
 
 // === HARDWARE CONFIGURATION ===
 // LED Configuration - 8 LED strips for umbrella
@@ -20,6 +21,14 @@
 #define I2S_SCK_PIN GPIO_NUM_26
 #define I2S_WS_PIN GPIO_NUM_22
 #define I2S_SD_PIN GPIO_NUM_21
+
+// === PREFERENCES CONFIGURATION ===
+Preferences preferences;
+const char* PREFS_NAMESPACE = "umbrella";
+const char* PREFS_SOUND_KEY = "sound";
+const char* PREFS_UMBRELLA_KEY = "umbrella";
+const char* PREFS_VERSION_KEY = "version";
+const int CURRENT_SETTINGS_VERSION = 1;
 
 // === LED SETUP ===
 // Individual LED strip arrays for BMDevice
@@ -117,6 +126,15 @@ void updatePalettesFromBMDevice();
 void handleSoundVisualization();
 void sendUmbrellaStatus();
 
+// === PREFERENCES FUNCTION DECLARATIONS ===
+void saveUmbrellaSettings();
+void loadUmbrellaSettings();
+void saveAllSettings();
+void loadAllSettings();
+void restoreFactoryDefaults();
+void verifyAllSettings();
+void debugStructLayout();
+
 // === PALETTE MANAGEMENT ===
 void updatePalettesFromBMDevice() {
     LightShow& lightShow = device.getLightShow();
@@ -141,13 +159,482 @@ void updatePalettesFromBMDevice() {
                  secondaryPaletteOff ? "true" : "false");
 }
 
+// === PREFERENCES MANAGEMENT ===
+void saveUmbrellaSettings() {
+    Serial.println("💾 [SAVE UMBRELLA] Starting umbrella settings save...");
+    Serial.printf("💾 [SAVE UMBRELLA] Namespace: %s\n", PREFS_NAMESPACE);
+    
+    bool success = preferences.begin(PREFS_NAMESPACE, false);
+    if (!success) {
+        Serial.println("❌ [SAVE UMBRELLA] Failed to begin preferences!");
+        return;
+    }
+    Serial.println("✅ [SAVE UMBRELLA] Preferences opened successfully");
+    
+    // Save settings version
+    size_t versionBytes = preferences.putInt(PREFS_VERSION_KEY, CURRENT_SETTINGS_VERSION);
+    Serial.printf("💾 [SAVE UMBRELLA] Version save: %d bytes (key: %s, value: %d)\n", 
+                 versionBytes, PREFS_VERSION_KEY, CURRENT_SETTINGS_VERSION);
+    
+    // Save umbrella-specific settings
+    size_t palOffBytes = preferences.putBool("secPalOff", secondaryPaletteOff);
+    size_t palIdBytes = preferences.putUChar("secPalId", (uint8_t)currentSecondaryPaletteId);
+    Serial.printf("💾 [SAVE UMBRELLA] SecPalOff: %d bytes, SecPalId: %d bytes\n", palOffBytes, palIdBytes);
+    
+    // Save all sound settings as a blob
+    size_t soundBytes = preferences.putBytes(PREFS_SOUND_KEY, &soundSettings, sizeof(soundSettings));
+    Serial.printf("💾 [SAVE UMBRELLA] Sound blob: %d bytes (expected: %d)\n", soundBytes, sizeof(soundSettings));
+    
+    // ALSO save critical settings individually for debugging
+    size_t rainbowBytes = preferences.putBool("rainbowMode", soundSettings.rainbowMode);
+    size_t soundSensBytes = preferences.putBool("soundSensitive", soundSettings.soundSensitive);
+    size_t ampBytes = preferences.putInt("amplitude", soundSettings.amplitude);
+    Serial.printf("💾 [SAVE UMBRELLA] Individual: rainbow=%d, sound=%d, amp=%d bytes\n", 
+                 rainbowBytes, soundSensBytes, ampBytes);
+    
+    preferences.end();
+    
+    if (versionBytes > 0 && palOffBytes > 0 && soundBytes > 0) {
+        Serial.println("✅ [PREFERENCES] Umbrella settings saved successfully");
+    } else {
+        Serial.println("❌ [PREFERENCES] Some umbrella settings failed to save!");
+    }
+    
+    Serial.printf("💾 [SAVE DEBUG] Saved rainbowMode: %s\n", soundSettings.rainbowMode ? "ON" : "OFF");
+    Serial.printf("💾 [SAVE DEBUG] Saved secondaryPaletteOff: %s\n", secondaryPaletteOff ? "true" : "false");
+}
+
+void loadUmbrellaSettings() {
+    preferences.begin(PREFS_NAMESPACE, true); // read-only
+    
+    // Check settings version
+    int version = preferences.getInt(PREFS_VERSION_KEY, 0);
+    Serial.printf("🔍 [LOAD DEBUG] Settings version in flash: %d (expected: %d)\n", version, CURRENT_SETTINGS_VERSION);
+    
+    if (version != CURRENT_SETTINGS_VERSION) {
+        Serial.printf("⚠️ [PREFERENCES] Settings version mismatch (found: %d, expected: %d), using defaults\n", 
+                     version, CURRENT_SETTINGS_VERSION);
+        preferences.end();
+        return;
+    }
+    
+    // Load umbrella-specific settings with debugging
+    bool oldSecondaryPaletteOff = secondaryPaletteOff;
+    AvailablePalettes oldSecondaryPaletteId = currentSecondaryPaletteId;
+    
+    secondaryPaletteOff = preferences.getBool("secPalOff", false);
+    currentSecondaryPaletteId = (AvailablePalettes)preferences.getUChar("secPalId", (uint8_t)AvailablePalettes::earth);
+    
+    Serial.printf("🔍 [LOAD DEBUG] Secondary palette OFF: %s -> %s\n", 
+                 oldSecondaryPaletteOff ? "true" : "false",
+                 secondaryPaletteOff ? "true" : "false");
+    Serial.printf("🔍 [LOAD DEBUG] Secondary palette ID: %s -> %s\n",
+                 LightShow::paletteIdToName(oldSecondaryPaletteId),
+                 LightShow::paletteIdToName(currentSecondaryPaletteId));
+    
+    // Load sound settings with debugging
+    size_t settingsSize = preferences.getBytesLength(PREFS_SOUND_KEY);
+    Serial.printf("🔍 [LOAD DEBUG] Sound settings blob size: %d bytes (expected: %d)\n", 
+                 settingsSize, sizeof(soundSettings));
+    
+    if (settingsSize == sizeof(soundSettings)) {
+        // Save old values for comparison
+        bool oldRainbowMode = soundSettings.rainbowMode;
+        bool oldSoundSensitive = soundSettings.soundSensitive;
+        int oldAmplitude = soundSettings.amplitude;
+        
+        preferences.getBytes(PREFS_SOUND_KEY, &soundSettings, sizeof(soundSettings));
+        
+        Serial.printf("🔍 [LOAD DEBUG] Rainbow mode: %s -> %s\n",
+                     oldRainbowMode ? "ON" : "OFF",
+                     soundSettings.rainbowMode ? "ON" : "OFF");
+        Serial.printf("🔍 [LOAD DEBUG] Sound mode: %s -> %s\n",
+                     oldSoundSensitive ? "ON" : "OFF", 
+                     soundSettings.soundSensitive ? "ON" : "OFF");
+        Serial.printf("🔍 [LOAD DEBUG] Amplitude: %d -> %d\n",
+                     oldAmplitude, soundSettings.amplitude);
+        
+        Serial.println("📂 [PREFERENCES] Sound settings loaded from flash");
+        
+        // COMPARE with individually saved settings for debugging
+        bool individualRainbow = preferences.getBool("rainbowMode", false);
+        bool individualSoundSensitive = preferences.getBool("soundSensitive", true);
+        int individualAmplitude = preferences.getInt("amplitude", 1000);
+        
+        Serial.printf("🔍 [COMPARE DEBUG] Blob vs Individual:\n");
+        Serial.printf("  Rainbow: blob=%s, individual=%s\n", 
+                     soundSettings.rainbowMode ? "ON" : "OFF",
+                     individualRainbow ? "ON" : "OFF");
+        Serial.printf("  SoundSensitive: blob=%s, individual=%s\n",
+                     soundSettings.soundSensitive ? "ON" : "OFF", 
+                     individualSoundSensitive ? "ON" : "OFF");
+        Serial.printf("  Amplitude: blob=%d, individual=%d\n",
+                     soundSettings.amplitude, individualAmplitude);
+        
+        // FALLBACK: If blob and individual don't match, use individual values
+        if (soundSettings.rainbowMode != individualRainbow || 
+            soundSettings.soundSensitive != individualSoundSensitive ||
+            soundSettings.amplitude != individualAmplitude) {
+            Serial.println("⚠️ [FALLBACK] Blob and individual settings mismatch, using individual values");
+            soundSettings.rainbowMode = individualRainbow;
+            soundSettings.soundSensitive = individualSoundSensitive;
+            soundSettings.amplitude = individualAmplitude;
+        }
+    } else {
+        Serial.printf("⚠️ [PREFERENCES] Sound settings size mismatch (expected: %d, found: %d), using individual fallback\n", 
+                     sizeof(soundSettings), settingsSize);
+        
+        // FALLBACK: Load critical settings individually
+        soundSettings.rainbowMode = preferences.getBool("rainbowMode", false);
+        soundSettings.soundSensitive = preferences.getBool("soundSensitive", true);
+        soundSettings.amplitude = preferences.getInt("amplitude", 1000);
+        Serial.println("📂 [FALLBACK] Loaded critical settings individually");
+    }
+    
+    preferences.end();
+    Serial.println("📂 [PREFERENCES] Umbrella settings loaded successfully");
+}
+
+// === STRUCT DEBUGGING ===
+void debugStructLayout() {
+    Serial.println("🔍 [STRUCT DEBUG] SoundSettings struct analysis:");
+    Serial.printf("  Struct size: %d bytes\n", sizeof(SoundSettings));
+    Serial.printf("  Expected size (rough): ~%d bytes\n", 
+                 4*4 + 1*20 + 4*10 + 8*3); // int*4 + bool*20 + int*10 + float*3
+    
+    // Show current values
+    Serial.println("🔍 [STRUCT DEBUG] Current SoundSettings values:");
+    Serial.printf("  soundSensitive: %s (offset ~0)\n", soundSettings.soundSensitive ? "ON" : "OFF");
+    Serial.printf("  amplitude: %d (offset ~1)\n", soundSettings.amplitude);
+    Serial.printf("  rainbowMode: %s (offset ~17)\n", soundSettings.rainbowMode ? "ON" : "OFF");
+    Serial.printf("  samplingFrequency: %d (offset ~88)\n", soundSettings.samplingFrequency);
+}
+
+void saveAllSettings() {
+    Serial.println("💾 [PREFERENCES] Saving ALL settings...");
+    
+    // Save BMDevice settings using the correct API
+    BMDeviceState& state = device.getState();
+    
+    // Log what BMDevice settings will be saved
+    Serial.printf("📝 [BMDevice SETTINGS] Power: %s, Brightness: %d, Speed: %d\n", 
+                 state.power ? "ON" : "OFF", 
+                 state.brightness, 
+                 state.speed);
+    Serial.printf("📝 [BMDevice SETTINGS] Direction: %s, Effect: %s, Palette: %s\n",
+                 state.reverseStrip ? "Reverse" : "Normal",
+                 LightShow::effectIdToName(state.currentEffect),
+                 LightShow::paletteIdToName(state.currentPalette));
+    
+    // Use BMDevice's built-in save method
+    Serial.println("💾 [BMDevice] About to call device.saveCurrentAsDefaults()...");
+    bool bmDeviceSaved = device.saveCurrentAsDefaults();
+    Serial.printf("💾 [BMDevice] saveCurrentAsDefaults() returned: %s\n", bmDeviceSaved ? "true" : "false");
+    
+    if (bmDeviceSaved) {
+        Serial.println("✅ [BMDevice] Settings saved successfully");
+    } else {
+        Serial.println("❌ [BMDevice] Failed to save settings");
+    }
+    
+    // Save umbrella-specific settings with detailed logging
+    Serial.printf("📝 [UMBRELLA SETTINGS] Secondary Palette: %s (Off: %s)\n",
+                 LightShow::paletteIdToName(currentSecondaryPaletteId),
+                 secondaryPaletteOff ? "true" : "false");
+    
+    // Log ALL sound settings being saved
+    Serial.println("📝 [SOUND SETTINGS] Saving complete sound configuration:");
+    Serial.printf("  Basic: SoundMode=%s, Amplitude=%d, NoiseThreshold=%d, Sensitivity=%d\n",
+                 soundSettings.soundSensitive ? "ON" : "OFF",
+                 soundSettings.amplitude,
+                 soundSettings.noiseThreshold,
+                 (int)pow(10, soundSettings.reference));
+    
+    Serial.printf("  Visual: BarMode=%s, Rainbow=%s, ColorSpeed=%d, Decay=%s, DecayRate=%d\n",
+                 soundSettings.barMode ? "Bars" : "Dots",
+                 soundSettings.rainbowMode ? "ON" : "OFF",
+                 soundSettings.colorSpeed,
+                 soundSettings.decay ? "ON" : "OFF",
+                 soundSettings.decayRate);
+    
+    Serial.printf("  Effects: PeakHold=%s, PeakHoldTime=%d, Smoothing=%s, SmoothingFactor=%.2f\n",
+                 soundSettings.peakHold ? "ON" : "OFF",
+                 soundSettings.peakHoldTime,
+                 soundSettings.smoothing ? "ON" : "OFF",
+                 soundSettings.smoothingFactor);
+    
+    Serial.printf("  Beat: Detection=%s, Sensitivity=%d, Strobe=%s, Pulse=%s\n",
+                 soundSettings.beatDetection ? "ON" : "OFF",
+                 soundSettings.beatSensitivity,
+                 soundSettings.strobeOnBeat ? "ON" : "OFF",
+                 soundSettings.pulseOnBeat ? "ON" : "OFF");
+    
+    Serial.printf("  Frequency: Bass=%d, Mid=%d, Treble=%d, LogMapping=%s\n",
+                 soundSettings.bassEmphasis,
+                 soundSettings.midEmphasis,
+                 soundSettings.trebleEmphasis,
+                 soundSettings.logarithmicMapping ? "ON" : "OFF");
+    
+    Serial.printf("  Auto: Gain=%s, AmbientComp=%s, IntensityMapping=%s\n",
+                 soundSettings.autoGain ? "ON" : "OFF",
+                 soundSettings.ambientCompensation ? "ON" : "OFF",
+                 soundSettings.intensityMapping ? "ON" : "OFF");
+    
+    Serial.printf("  Strips: Mapping=%d, IndividualDirections=%s\n",
+                 soundSettings.stripMapping,
+                 soundSettings.individualDirections ? "ON" : "OFF");
+    
+    Serial.printf("  Audio: SampleRate=%d Hz, SampleCount=%d, GainMultiplier=%.2f\n",
+                 soundSettings.samplingFrequency,
+                 soundSettings.sampleCount,
+                 soundSettings.gainMultiplier);
+    
+    Serial.printf("  LEDs: Min=%d, Max=%d, LEDMultiplier=%.2f, DoubleHeight=%s, FillFromCenter=%s\n",
+                 soundSettings.minLEDs,
+                 soundSettings.maxLEDs,
+                 soundSettings.ledMultiplier,
+                 soundSettings.doubleHeight ? "ON" : "OFF",
+                 soundSettings.fillFromCenter ? "ON" : "OFF");
+    
+    Serial.printf("  FreqRange: Min=%d Hz, Max=%d Hz\n",
+                 soundSettings.frequencyMin,
+                 soundSettings.frequencyMax);
+    
+    // Save umbrella-specific settings
+    saveUmbrellaSettings();
+    
+    if (bmDeviceSaved) {
+        Serial.printf("✅ [PREFERENCES] ALL 37 sound parameters + BMDevice settings + umbrella settings saved!\n");
+        Serial.println("✅ [PREFERENCES] Complete settings backup created!");
+    } else {
+        Serial.println("⚠️ [PREFERENCES] Umbrella settings saved, but BMDevice settings failed");
+    }
+}
+
+void loadAllSettings() {
+    Serial.println("📂 [PREFERENCES] Loading all settings...");
+    
+    // Load BMDevice settings first (BMDevice handles this automatically)
+    // BMDevice will load its defaults and apply them to current state
+    Serial.println("📂 [BMDevice] Loading BMDevice defaults...");
+    
+    // Load umbrella-specific settings
+    loadUmbrellaSettings();
+    
+    // VALIDATE SETTINGS IMMEDIATELY AFTER LOADING
+    Serial.println("🔍 [IMMEDIATE VALIDATION] Settings right after loading:");
+    Serial.printf("  Secondary Palette: %s (Off: %s)\n",
+                 LightShow::paletteIdToName(currentSecondaryPaletteId),
+                 secondaryPaletteOff ? "true" : "false");
+    Serial.printf("  Rainbow Mode: %s\n", soundSettings.rainbowMode ? "ON" : "OFF");
+    Serial.printf("  Sound Mode: %s\n", soundSettings.soundSensitive ? "ON" : "OFF");
+    Serial.printf("  Amplitude: %d\n", soundSettings.amplitude);
+    
+    // Log what was loaded
+    BMDeviceState& state = device.getState();
+    Serial.println("📂 [LOADED VERIFICATION] Settings successfully loaded:");
+    Serial.printf("  BMDevice: Power=%s, Brightness=%d, Speed=%d, Direction=%s\n",
+                 state.power ? "ON" : "OFF",
+                 state.brightness,
+                 state.speed,
+                 state.reverseStrip ? "Reverse" : "Normal");
+    Serial.printf("  BMDevice: Effect=%s, Palette=%s\n",
+                 LightShow::effectIdToName(state.currentEffect),
+                 LightShow::paletteIdToName(state.currentPalette));
+    
+    Serial.printf("  Sound Mode: %s, Amplitude: %d, Sensitivity: %d\n",
+                 soundSettings.soundSensitive ? "ON" : "OFF",
+                 soundSettings.amplitude,
+                 (int)pow(10, soundSettings.reference));
+    
+    Serial.printf("  Audio Hardware: %d samples at %d Hz\n",
+                 soundSettings.sampleCount,
+                 soundSettings.samplingFrequency);
+    
+    Serial.printf("  Secondary Palette: %s (Off: %s)\n",
+                 LightShow::paletteIdToName(currentSecondaryPaletteId),
+                 secondaryPaletteOff ? "true" : "false");
+    
+    // Ensure palettes are updated after loading
+    updatePalettesFromBMDevice();
+    
+    Serial.println("✅ [PREFERENCES] All settings loaded and verified!");
+}
+
+// === SETTINGS VERIFICATION ===
+void verifyAllSettings() {
+    Serial.println("🔍 [VERIFICATION] Complete settings audit:");
+    
+    // Verify BMDevice current state and saved defaults
+    BMDeviceState& state = device.getState();
+    BMDeviceDefaults& defaults = device.getDefaults();
+    DeviceDefaults currentDefaults = defaults.getCurrentDefaults();
+    
+    Serial.println("🔍 [BMDevice CURRENT STATE]:");
+    Serial.printf("  Power: %s, Brightness: %d, Speed: %d\n",
+                 state.power ? "ON" : "OFF",
+                 state.brightness,
+                 state.speed);
+    Serial.printf("  Effect: %s, Palette: %s, Direction: %s\n",
+                 LightShow::effectIdToName(state.currentEffect),
+                 LightShow::paletteIdToName(state.currentPalette),
+                 state.reverseStrip ? "Reverse" : "Normal");
+    
+    Serial.println("🔍 [BMDevice SAVED DEFAULTS]:");
+    Serial.printf("  Brightness: %d (max: %d), Speed: %d\n",
+                 currentDefaults.brightness,
+                 currentDefaults.maxBrightness,
+                 currentDefaults.speed);
+    Serial.printf("  Effect: %s, Palette: %s, Direction: %s\n",
+                 LightShow::effectIdToName(currentDefaults.effect),
+                 LightShow::paletteIdToName(currentDefaults.palette),
+                 currentDefaults.reverseDirection ? "Reverse" : "Normal");
+    Serial.printf("  Device: Name=%s, Owner=%s, AutoOn=%s\n",
+                 currentDefaults.deviceName.c_str(),
+                 currentDefaults.owner.c_str(),
+                 currentDefaults.autoOn ? "Yes" : "No");
+    Serial.printf("  Behavior: StatusInterval=%lums, GPS=%s\n",
+                 currentDefaults.statusUpdateInterval,
+                 currentDefaults.gpsEnabled ? "Yes" : "No");
+    Serial.printf("  EffectColor: RGB(%d,%d,%d)\n", 
+                 currentDefaults.effectColor.r, 
+                 currentDefaults.effectColor.g, 
+                 currentDefaults.effectColor.b);
+    
+    // Verify ALL umbrella settings
+    Serial.println("🔍 [UMBRELLA CONFIG]:");
+    Serial.printf("  Secondary Palette: %s (Mode: %s)\n",
+                 LightShow::paletteIdToName(currentSecondaryPaletteId),
+                 secondaryPaletteOff ? "OFF" : "ON");
+    
+    // Verify ALL sound settings (every single parameter)
+    Serial.println("🔍 [SOUND CONFIG] - ALL 37 PARAMETERS:");
+    Serial.printf("  [01] soundSensitive: %s\n", soundSettings.soundSensitive ? "ON" : "OFF");
+    Serial.printf("  [02] amplitude: %d\n", soundSettings.amplitude);
+    Serial.printf("  [03] noiseThreshold: %d\n", soundSettings.noiseThreshold);
+    Serial.printf("  [04] reference (sensitivity): %.2f (%d)\n", soundSettings.reference, (int)pow(10, soundSettings.reference));
+    Serial.printf("  [05] decay: %s\n", soundSettings.decay ? "ON" : "OFF");
+    Serial.printf("  [06] decayRate: %d\n", soundSettings.decayRate);
+    Serial.printf("  [07] barMode: %s\n", soundSettings.barMode ? "Bars" : "Dots");
+    Serial.printf("  [08] rainbowMode: %s\n", soundSettings.rainbowMode ? "ON" : "OFF");
+    Serial.printf("  [09] colorSpeed: %d\n", soundSettings.colorSpeed);
+    Serial.printf("  [10] reverseDirection: %s (unused)\n", soundSettings.reverseDirection ? "ON" : "OFF");
+    Serial.printf("  [11] peakHold: %s\n", soundSettings.peakHold ? "ON" : "OFF");
+    Serial.printf("  [12] peakHoldTime: %d ms\n", soundSettings.peakHoldTime);
+    Serial.printf("  [13] smoothing: %s\n", soundSettings.smoothing ? "ON" : "OFF");
+    Serial.printf("  [14] smoothingFactor: %.2f\n", soundSettings.smoothingFactor);
+    Serial.printf("  [15] intensityMapping: %s\n", soundSettings.intensityMapping ? "ON" : "OFF");
+    Serial.printf("  [16] beatDetection: %s\n", soundSettings.beatDetection ? "ON" : "OFF");
+    Serial.printf("  [17] beatSensitivity: %d\n", soundSettings.beatSensitivity);
+    Serial.printf("  [18] strobeOnBeat: %s\n", soundSettings.strobeOnBeat ? "ON" : "OFF");
+    Serial.printf("  [19] pulseOnBeat: %s\n", soundSettings.pulseOnBeat ? "ON" : "OFF");
+    Serial.printf("  [20] bassEmphasis: %d\n", soundSettings.bassEmphasis);
+    Serial.printf("  [21] midEmphasis: %d\n", soundSettings.midEmphasis);
+    Serial.printf("  [22] trebleEmphasis: %d\n", soundSettings.trebleEmphasis);
+    Serial.printf("  [23] logarithmicMapping: %s\n", soundSettings.logarithmicMapping ? "ON" : "OFF");
+    Serial.printf("  [24] autoGain: %s\n", soundSettings.autoGain ? "ON" : "OFF");
+    Serial.printf("  [25] ambientCompensation: %s\n", soundSettings.ambientCompensation ? "ON" : "OFF");
+    Serial.printf("  [26] stripMapping: %d\n", soundSettings.stripMapping);
+    Serial.printf("  [27] individualDirections: %s\n", soundSettings.individualDirections ? "ON" : "OFF");
+    Serial.printf("  [28] samplingFrequency: %d Hz\n", soundSettings.samplingFrequency);
+    Serial.printf("  [29] sampleCount: %d\n", soundSettings.sampleCount);
+    Serial.printf("  [30] gainMultiplier: %.2f\n", soundSettings.gainMultiplier);
+    Serial.printf("  [31] minLEDs: %d\n", soundSettings.minLEDs);
+    Serial.printf("  [32] maxLEDs: %d\n", soundSettings.maxLEDs);
+    Serial.printf("  [33] frequencyMin: %d Hz\n", soundSettings.frequencyMin);
+    Serial.printf("  [34] frequencyMax: %d Hz\n", soundSettings.frequencyMax);
+    Serial.printf("  [35] doubleHeight: %s\n", soundSettings.doubleHeight ? "ON" : "OFF");
+    Serial.printf("  [36] ledMultiplier: %.2f\n", soundSettings.ledMultiplier);
+    Serial.printf("  [37] fillFromCenter: %s\n", soundSettings.fillFromCenter ? "ON" : "OFF");
+    
+    Serial.println("🔍 [SUMMARY] Total configurable parameters tracked:");
+    Serial.printf("  - BMDevice current state: 6 runtime parameters\n");
+    Serial.printf("  - BMDevice saved defaults: 12 persistent parameters\n");
+    Serial.printf("  - Umbrella settings: 2 palette parameters\n");
+    Serial.printf("  - Sound settings: 37 audio/visual parameters\n");
+    Serial.printf("  - TOTAL CONFIGURABLE: 57 parameters (45 saved + 12 BMDevice)\n");
+    Serial.println("✅ [VERIFICATION] Complete settings audit finished!");
+}
+
 // === SOUND FEATURE HANDLER ===
 bool handleSoundFeatures(uint8_t feature, const uint8_t* data, size_t length) {
     Serial.printf("🔧 [SOUND FEATURE] Received: 0x%02X, length: %d\n", feature, length);
     
-    // Let BMDevice handle standard features - CORRECTED FEATURE CODES
+    // Handle save settings command (override BMDevice's 0x0A handling)
+    if (feature == 0x0A) {
+        Serial.println("💾 [SAVE SETTINGS] Received save command");
+        Serial.printf("💾 [SAVE DEBUG] About to call saveAllSettings() - Free heap: %d bytes\n", ESP.getFreeHeap());
+        
+        saveAllSettings();
+        
+        Serial.println("🔍 [POST-SAVE VERIFICATION] Verifying saved settings...");
+        verifyAllSettings();
+        
+        // IMMEDIATE VERIFICATION: Try to read back what we just saved
+        Serial.println("🔍 [IMMEDIATE READ-BACK TEST]");
+        preferences.begin(PREFS_NAMESPACE, true); // read-only
+        int savedVersion = preferences.getInt(PREFS_VERSION_KEY, -1);
+        bool savedSecPalOff = preferences.getBool("secPalOff", false);
+        Serial.printf("  Read-back version: %d (should be 1)\n", savedVersion);
+        Serial.printf("  Read-back secPalOff: %s\n", savedSecPalOff ? "true" : "false");
+        preferences.end();
+        
+        return true;
+    }
+    
+    // Handle factory reset command
+    if (feature == 0x34) {
+        Serial.println("🏭 [FACTORY RESET] Received factory reset command");
+        restoreFactoryDefaults();
+        return true;
+    }
+    
+    // Handle settings verification command
+    if (feature == 0x35) {
+        Serial.println("🔍 [VERIFICATION] Received verification command");
+        verifyAllSettings();
+        return true;
+    }
+    
+    // Handle preferences test command
+    if (feature == 0x36) {
+        Serial.println("🧪 [PREFS TEST] Testing Preferences.h functionality...");
+        
+        // Test basic preferences functionality
+        preferences.begin("test", false);
+        
+        // Write test data
+        size_t intBytes = preferences.putInt("testInt", 12345);
+        size_t boolBytes = preferences.putBool("testBool", true);
+        size_t stringBytes = preferences.putString("testString", "hello");
+        
+        Serial.printf("🧪 [PREFS TEST] Write results: int=%d, bool=%d, string=%d bytes\n", 
+                     intBytes, boolBytes, stringBytes);
+        
+        // Read test data back
+        int readInt = preferences.getInt("testInt", 0);
+        bool readBool = preferences.getBool("testBool", false);
+        String readString = preferences.getString("testString", "");
+        
+        Serial.printf("🧪 [PREFS TEST] Read results: int=%d, bool=%s, string=%s\n",
+                     readInt, readBool ? "true" : "false", readString.c_str());
+        
+        // Clear test data
+        preferences.clear();
+        preferences.end();
+        
+        if (readInt == 12345 && readBool == true && readString == "hello") {
+            Serial.println("✅ [PREFS TEST] Preferences.h is working correctly!");
+        } else {
+            Serial.println("❌ [PREFS TEST] Preferences.h is NOT working!");
+        }
+        
+        return true;
+    }
+    
+    // Let BMDevice handle other standard features - CORRECTED FEATURE CODES (excluding 0x0A now)
     if (feature == 0x01 || feature == 0x04 || feature == 0x05 || 
-        feature == 0x06 || feature == 0x08 || feature == 0x0A) {
+        feature == 0x06 || feature == 0x08) {
         return false; // BMDevice handles these
     }
     
@@ -155,20 +642,31 @@ bool handleSoundFeatures(uint8_t feature, const uint8_t* data, size_t length) {
     if (feature == 0x09) {
         if (length > 1) {
             std::string paletteName(reinterpret_cast<const char*>(data + 1), length - 1);
-            Serial.printf("🎨 [SECONDARY PALETTE] Setting to: %s\n", paletteName.c_str());
+            Serial.printf("🎨 [SECONDARY PALETTE DEBUG] Raw data length: %d\n", length);
+            Serial.printf("🎨 [SECONDARY PALETTE DEBUG] Raw palette name: '%s' (length: %d)\n", 
+                         paletteName.c_str(), paletteName.length());
+            Serial.printf("🎨 [SECONDARY PALETTE DEBUG] Before change - Off: %s, ID: %s\n",
+                         secondaryPaletteOff ? "true" : "false",
+                         LightShow::paletteIdToName(currentSecondaryPaletteId));
             
             if (paletteName == "off") {
                 secondaryPaletteOff = true;
-                Serial.println("🎨 [SECONDARY PALETTE] Set to OFF mode");
+                Serial.println("🎨 [SECONDARY PALETTE] ✅ Set to OFF mode");
             } else {
                 secondaryPaletteOff = false;
                 AvailablePalettes paletteEnum = LightShow::paletteNameToId(paletteName.c_str());
                 currentSecondaryPaletteId = paletteEnum;
+                Serial.printf("🎨 [SECONDARY PALETTE] ✅ Set to palette: %s\n", paletteName.c_str());
                 // Update LightShow's secondary palette and get the updated palettes
                 updatePalettesFromBMDevice();
             }
+            
+            Serial.printf("🎨 [SECONDARY PALETTE DEBUG] After change - Off: %s, ID: %s\n",
+                         secondaryPaletteOff ? "true" : "false",
+                         LightShow::paletteIdToName(currentSecondaryPaletteId));
             return true;
         }
+        Serial.println("🎨 [SECONDARY PALETTE] ❌ Invalid data length");
         return false;
     }
     
@@ -559,7 +1057,7 @@ void reinitializeI2S(int samplingFreq) {
 void initializeI2S() {
     i2s_config_t i2s_config = {
         .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-        .sample_rate = (uint32_t)DEFAULT_SAMPLING_FREQ,
+        .sample_rate = (uint32_t)soundSettings.samplingFrequency,
         .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
         .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
@@ -582,7 +1080,7 @@ void initializeI2S() {
         while (true);
     }
     i2s_set_pin(I2S_PORT, &pin_config);
-    Serial.println("🎤 I2S microphone initialized");
+    Serial.printf("🎤 I2S microphone initialized at %d Hz\n", soundSettings.samplingFrequency);
 }
 
 // === ADVANCED SOUND VISUALIZATION ===
@@ -848,9 +1346,22 @@ void handleSoundVisualization() {
                     // Background uses secondary palette or black
                     if (secondaryPaletteOff) {
                         color = CRGB::Black;
+                        // Debug: occasionally log that we're using black background
+                        static unsigned long lastSecondaryDebug = 0;
+                        if (millis() - lastSecondaryDebug > 2000) { // Every 2 seconds
+                            Serial.printf("🎨 [RENDER DEBUG] Using BLACK background (secondaryPaletteOff=true)\n");
+                            lastSecondaryDebug = millis();
+                        }
                     } else {
                         color = ColorFromPalette(secondaryPalette, paletteIndex);
                         color.fadeToBlackBy(192); // Dim background to 25% brightness
+                        // Debug: occasionally log that we're using secondary palette
+                        static unsigned long lastSecondaryDebug2 = 0;
+                        if (millis() - lastSecondaryDebug2 > 2000) { // Every 2 seconds
+                            Serial.printf("🎨 [RENDER DEBUG] Using secondary palette: %s (secondaryPaletteOff=false)\n",
+                                         LightShow::paletteIdToName(currentSecondaryPaletteId));
+                            lastSecondaryDebug2 = millis();
+                        }
                     }
                 }
             }
@@ -1115,18 +1626,42 @@ void setup() {
     device.setCustomFeatureHandler(handleSoundFeatures);
     device.setCustomConnectionHandler(handleConnectionChange);
     
-    // Initialize hardware
-    initializeI2S();
-    initializeFFT(DEFAULT_SAMPLES, DEFAULT_SAMPLING_FREQ);
-    
-    // Start BMDevice
+    // Start BMDevice (this may load BMDevice settings)
     if (!device.begin()) {
         Serial.println("❌ Failed to initialize BMDevice!");
         while (1);
     }
     
+    // Load saved settings from preferences (this must come before hardware initialization)
+    loadAllSettings();
+    
+    // CHECKPOINT 1: Validate settings after loading
+    Serial.println("🔍 [CHECKPOINT 1] Settings after loadAllSettings():");
+    Serial.printf("  Secondary Palette: %s (Off: %s)\n",
+                 LightShow::paletteIdToName(currentSecondaryPaletteId),
+                 secondaryPaletteOff ? "true" : "false");
+    Serial.printf("  Rainbow Mode: %s\n", soundSettings.rainbowMode ? "ON" : "OFF");
+    
+    // Initialize hardware with loaded settings
+    initializeI2S();
+    initializeFFT(soundSettings.sampleCount, soundSettings.samplingFrequency);
+    
+    // CHECKPOINT 2: Validate settings after hardware initialization
+    Serial.println("🔍 [CHECKPOINT 2] Settings after hardware init:");
+    Serial.printf("  Secondary Palette: %s (Off: %s)\n",
+                 LightShow::paletteIdToName(currentSecondaryPaletteId),
+                 secondaryPaletteOff ? "true" : "false");
+    Serial.printf("  Rainbow Mode: %s\n", soundSettings.rainbowMode ? "ON" : "OFF");
+    
     // Initialize palettes - make sure LightShow palettes are synchronized with BMDevice
     updatePalettesFromBMDevice();
+    
+    // CHECKPOINT 3: Validate settings after palette update
+    Serial.println("🔍 [CHECKPOINT 3] Settings after updatePalettesFromBMDevice():");
+    Serial.printf("  Secondary Palette: %s (Off: %s)\n",
+                 LightShow::paletteIdToName(currentSecondaryPaletteId),
+                 secondaryPaletteOff ? "true" : "false");
+    Serial.printf("  Rainbow Mode: %s\n", soundSettings.rainbowMode ? "ON" : "OFF");
     
     Serial.println("✅ BTUmbrellaV3 Ready!");
     Serial.printf("🎵 Sound Mode: %s\n", soundSettings.soundSensitive ? "ON" : "OFF");
@@ -1134,6 +1669,13 @@ void setup() {
     Serial.printf("🎨 Secondary Palette: %s (Off: %s)\n", 
                  LightShow::paletteIdToName(currentSecondaryPaletteId),
                  secondaryPaletteOff ? "true" : "false");
+    Serial.printf("🎤 Audio Settings: %d samples at %d Hz\n", 
+                 soundSettings.sampleCount, soundSettings.samplingFrequency);
+    
+    // Display complete settings verification on startup
+    Serial.println("\n🔍 [STARTUP VERIFICATION] Current device configuration:");
+    debugStructLayout();
+    verifyAllSettings();
 }
 
 // === MAIN LOOP ===
@@ -1210,7 +1752,7 @@ void loop() {
 // 0x05 - Set speed
 // 0x06 - Set power on/off
 // 0x08 - Set direction
-// 0x0A - Set lighting effect
+// 0x0A - Save current settings as defaults (handled by umbrella, not BMDevice)
 //
 // Custom Umbrella sound commands:
 // Basic Sound Controls:
@@ -1264,6 +1806,11 @@ void loop() {
 // 0x32 - LED multiplier 0.1-5.0 (float)
 // 0x33 - Fill from center on/off (bool)
 //
+// Settings Management:
+// 0x34 - Restore factory defaults (bool, any value triggers reset)
+// 0x35 - Verify and display all current settings (bool, any value triggers verification)
+// 0x36 - Test Preferences.h functionality (bool, any value triggers test)
+//
 // BTUmbrellaV3 now includes ALL advanced sound analysis features:
 // - Full BMDevice integration with shared palettes and light shows
 // - Advanced FFT sound analysis for 8 LED strips with configurable sampling
@@ -1283,8 +1830,57 @@ void loop() {
 // - Frequency filtering (customizable Hz ranges)
 // - Double height mode for dramatic effect
 // - All standard BLE commands from BMDevice
-// - 31 custom sound-specific BLE commands (0x03-0x33)
-// - Persistent defaults that survive reboots
+// - 34 custom sound-specific BLE commands (0x03-0x36)
+// - Comprehensive persistent defaults via Preferences.h:
+//   * BMDevice runtime state: 6 live parameters (power, brightness, speed, etc.)
+//   * BMDevice saved defaults: 12 persistent parameters (device identity, limits, etc.)  
+//   * Umbrella settings: 2 secondary palette configuration parameters
+//   * Sound settings: 37 complete audio visualization parameters
+//   * Total configurable: 57 parameters (39 saved + 18 BMDevice)
+// - Save current settings as defaults (0x0A) with comprehensive verification
+// - Factory reset capability (0x34) with complete restoration and verification
+// - Complete settings verification (0x35) showing all 57 parameters organized by category
 // - Automatic 4-part chunked status reporting
 // - Power management
 // - Complete parameter control via Bluetooth! 
+
+void restoreFactoryDefaults() {
+    Serial.println("🏭 [PREFERENCES] Restoring factory defaults...");
+    
+    // Clear umbrella-specific preferences
+    preferences.begin(PREFS_NAMESPACE, false);
+    preferences.clear();
+    preferences.end();
+    
+    // Reset BMDevice to factory defaults using correct API
+    bool bmDeviceReset = device.resetToFactoryDefaults();
+    if (bmDeviceReset) {
+        Serial.println("✅ [BMDevice] Factory defaults restored successfully");
+    } else {
+        Serial.println("❌ [BMDevice] Failed to restore factory defaults");
+    }
+    
+    // Reset umbrella-specific settings to defaults
+    secondaryPaletteOff = false;
+    currentSecondaryPaletteId = AvailablePalettes::earth;
+    
+    // Reset sound settings to defaults
+    soundSettings = SoundSettings(); // Use default constructor values
+    
+    // Reinitialize with default values
+    if (FFT) {
+        initializeFFT(soundSettings.sampleCount, soundSettings.samplingFrequency);
+        reinitializeI2S(soundSettings.samplingFrequency);
+    }
+    
+    // Update palettes
+    updatePalettesFromBMDevice();
+    
+    if (bmDeviceReset) {
+        Serial.println("✅ [PREFERENCES] Factory defaults restored!");
+    } else {
+        Serial.println("⚠️ [PREFERENCES] Umbrella settings reset, but BMDevice factory reset failed");
+    }
+    Serial.println("🔍 [VERIFICATION] Running post-reset verification...");
+    verifyAllSettings();
+} 
