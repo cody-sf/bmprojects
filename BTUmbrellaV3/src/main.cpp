@@ -2,47 +2,48 @@
 #include <driver/i2s.h>
 #include <arduinoFFT.h>
 
+// === HARDWARE CONFIGURATION ===
 // LED Configuration - 8 LED strips for umbrella
 #define NUM_STRIPS 8
 #define LEDS_PER_STRIP 38
 #define COLOR_ORDER GRB
 
-// BLE Configuration - Using umbrella-specific UUIDs
+// BLE Configuration - Same UUIDs as original
 #define SERVICE_UUID "87748abc-e491-43a1-92bd-20b94ba20df4"
 #define FEATURES_UUID "e06544bc-1989-4c0b-9ada-8cd4491d23a5"
 #define STATUS_UUID "8d78c901-7dc0-4e1b-9ac9-34731a1ccf49"
 
 // Sound Analysis Configuration
-#define DEFAULT_SAMPLES 256             // Must be a power of 2
-#define DEFAULT_SAMPLING_FREQ 46000   // Hz, max frequency analyzed = sampleF/2
-#define I2S_PORT I2S_NUM_0      // I2S Port
-#define I2S_SCK_PIN GPIO_NUM_26 // Bit Clock
-#define I2S_WS_PIN GPIO_NUM_22  // Word Select (LRCLK)
-#define I2S_SD_PIN GPIO_NUM_21  // Data Input
+#define DEFAULT_SAMPLES 256
+#define DEFAULT_SAMPLING_FREQ 46000
+#define I2S_PORT I2S_NUM_0
+#define I2S_SCK_PIN GPIO_NUM_26
+#define I2S_WS_PIN GPIO_NUM_22
+#define I2S_SD_PIN GPIO_NUM_21
 
-// LED Setup - Individual strips for BMDevice
-CRGB leds0[LEDS_PER_STRIP];
-CRGB leds1[LEDS_PER_STRIP];
-CRGB leds2[LEDS_PER_STRIP];
-CRGB leds3[LEDS_PER_STRIP];
-CRGB leds4[LEDS_PER_STRIP];
-CRGB leds5[LEDS_PER_STRIP];
-CRGB leds6[LEDS_PER_STRIP];
-CRGB leds7[LEDS_PER_STRIP];
+// === LED SETUP ===
+// Individual LED strip arrays for BMDevice
+CRGB leds0[LEDS_PER_STRIP], leds1[LEDS_PER_STRIP], leds2[LEDS_PER_STRIP], leds3[LEDS_PER_STRIP];
+CRGB leds4[LEDS_PER_STRIP], leds5[LEDS_PER_STRIP], leds6[LEDS_PER_STRIP], leds7[LEDS_PER_STRIP];
 
-// 2D array for sound analysis (points to individual strips)
+// 2D array for easy sound analysis access
 CRGB* leds[NUM_STRIPS] = {leds0, leds1, leds2, leds3, leds4, leds5, leds6, leds7};
 
-// Sound Analysis Variables - using dynamic allocation
+// === SOUND ANALYSIS VARIABLES ===
 double* vReal = nullptr;
 double* vImag = nullptr;
 ArduinoFFT<double>* FFT = nullptr;
-int currentSampleCount = DEFAULT_SAMPLES;
-int currentSamplingFreq = DEFAULT_SAMPLING_FREQ;
 
-// Enhanced Sound Settings with all the cool new features
+// === PALETTE MANAGEMENT ===
+// Simple, clean palette variables (like original Umbrella.ino)
+CRGBPalette16 primaryPalette;
+CRGBPalette16 secondaryPalette;
+AvailablePalettes currentSecondaryPaletteId = AvailablePalettes::earth;
+bool secondaryPaletteOff = false;  // Start with secondary palette ON for proper visualization
+
+// === SOUND SETTINGS ===
 struct SoundSettings {
-    // Basic settings (existing)
+    // Basic settings
     bool soundSensitive = true;
     int amplitude = 1000;
     int noiseThreshold = 500;
@@ -50,432 +51,337 @@ struct SoundSettings {
     bool decay = false;
     int decayRate = 100;
     
-    // Peak Hold settings
-    bool peakHold = false;
-    int peakHoldTime = 500;  // milliseconds
-    
-    // Smoothing
-    bool smoothing = true;
-    float smoothingFactor = 0.3;  // 0.0 = no smoothing, 1.0 = maximum smoothing
-    
     // Visual modes
-    bool barMode = true;  // true = bars, false = dots
-    bool rainbowMode = false;  // override palettes with rainbow
+    bool barMode = true;
+    bool rainbowMode = false;
+    int colorSpeed = 50;
+    bool reverseDirection = false;
     
-    // Color dynamics
-    int colorSpeed = 50;  // 0-100, how fast colors cycle
-    bool intensityMapping = false;  // map volume to color intensity instead of height
+    // Advanced features
+    bool peakHold = false;
+    int peakHoldTime = 500;
+    bool smoothing = true;
+    float smoothingFactor = 0.3;
+    bool intensityMapping = false;
     
     // Beat detection
     bool beatDetection = false;
-    int beatSensitivity = 70;  // 0-100
+    int beatSensitivity = 70;
     bool strobeOnBeat = false;
     bool pulseOnBeat = false;
     
-    // Frequency control
-    int bassEmphasis = 50;    // 0-100
-    int midEmphasis = 50;     // 0-100  
-    int trebleEmphasis = 50;  // 0-100
-    bool logarithmicMapping = true;  // true = log, false = linear
+    // Frequency controls
+    int bassEmphasis = 50;
+    int midEmphasis = 50;
+    int trebleEmphasis = 50;
+    bool logarithmicMapping = true;
     
-    // Auto adjustment
+    // Auto features
     bool autoGain = false;
     bool ambientCompensation = false;
+    int stripMapping = 0;
+    bool individualDirections = false;
     
-    // Strip configuration
-    bool individualDirections = false;  // each strip can have own direction
-    int stripMapping = 0;  // 0=normal, 1=bass-to-treble, 2=treble-to-bass, 3=center-out
-    
-    // NEW: Advanced audio settings
-    int samplingFrequency = DEFAULT_SAMPLING_FREQ;  // Hz, configurable sampling rate
-    int sampleCount = DEFAULT_SAMPLES;  // Number of samples, must be power of 2
-    float gainMultiplier = 1.0;  // Overall gain boost multiplier
-    int minLEDs = 0;  // Minimum number of LEDs to always light up
-    int maxLEDs = LEDS_PER_STRIP;  // Maximum number of LEDs to use
-    
-    // NEW: Frequency filtering
-    int frequencyMin = 50;   // Hz, minimum frequency to analyze
-    int frequencyMax = 8000; // Hz, maximum frequency to analyze
-    
-    // NEW: Visual enhancements
-    bool doubleHeight = false;  // Double the bar height calculation
-    float ledMultiplier = 1.0;  // Multiply LED count for more sensitivity
-    bool fillFromCenter = false;  // Fill bars from center instead of bottom
+    // Advanced audio settings
+    int samplingFrequency = DEFAULT_SAMPLING_FREQ;
+    int sampleCount = DEFAULT_SAMPLES;
+    float gainMultiplier = 1.0;
+    int minLEDs = 0;
+    int maxLEDs = LEDS_PER_STRIP;
+    int frequencyMin = 50;
+    int frequencyMax = 8000;
+    bool doubleHeight = false;
+    float ledMultiplier = 1.0;
+    bool fillFromCenter = false;
 };
 
 SoundSettings soundSettings;
 
-// Palette variables (like original)
-CRGBPalette16 primaryPalette;
-CRGBPalette16 secondaryPalette;
-
-// Track current secondary palette name for status updates
-AvailablePalettes currentSecondaryPaletteId = AvailablePalettes::earth;
-bool secondaryPaletteOff = true;  // Default to OFF for better primary palette visibility
-
-// Create BMDevice - Umbrella with no GPS support
-BMDevice device("Umbrella-CL", SERVICE_UUID, FEATURES_UUID, STATUS_UUID);
-
-// Function declarations
-void sendUmbrellaStatusUpdate();
-void initializeFFT(int sampleCount, int samplingFreq);
-void reinitializeI2S(int samplingFreq);
-void updateLocalPalettes();
-
-// Peak hold tracking
+// === TRACKING VARIABLES ===
 float peakValues[NUM_STRIPS] = {0};
 unsigned long peakTimes[NUM_STRIPS] = {0};
-
-// Smoothing tracking
 float smoothedValues[NUM_STRIPS] = {0};
-
-// Beat detection
 float previousAverage = 0;
 unsigned long lastBeatTime = 0;
 bool beatDetected = false;
-
-// Auto-gain tracking
 float recentMax = 0;
 unsigned long lastGainAdjust = 0;
 
-enum StatusUpdateState {
-    STATUS_IDLE,
-    STATUS_START_BASIC,
-    STATUS_BASIC_SENT,
-    STATUS_SOUND_SENT,
-    STATUS_ADVANCED_SENT,
-    STATUS_SUPER_ADVANCED_SENT
-};
-StatusUpdateState statusUpdateState = STATUS_IDLE;
-unsigned long statusUpdateTimer = 0;
-const unsigned long STATUS_UPDATE_DELAY = 25; // Reduced from 50ms to 25ms for faster updates
+// === BMDevice ===
+BMDevice device("Umbrella-CL", SERVICE_UUID, FEATURES_UUID, STATUS_UUID);
 
-// Custom feature handler for sound-specific commands
-bool handleSoundFeatures(uint8_t feature, const uint8_t* data, size_t length) {
-    Serial.printf("🔧 [DEBUG] Received custom feature: 0x%02X, length: %d\n", feature, length);
+// === FUNCTION DECLARATIONS ===
+void initializeFFT(int sampleCount, int samplingFreq);
+void reinitializeI2S(int samplingFreq);
+void updatePalettesFromBMDevice();
+void handleSoundVisualization();
+void sendUmbrellaStatus();
+
+// === PALETTE MANAGEMENT ===
+void updatePalettesFromBMDevice() {
+    LightShow& lightShow = device.getLightShow();
+    BMDeviceState& state = device.getState();
     
-    // Let BMDevice handle its standard features - CORRECTED FEATURE CODES
-    if (feature == 0x01 || feature == 0x04 ||  // power, brightness
-        feature == 0x05 || feature == 0x06 ||  // speed, direction
-        feature == 0x08 || feature == 0x0A) {  // palette, effect
-        Serial.printf("⚡ [PASSTHROUGH] Letting BMDevice handle feature: 0x%02X\n", feature);
-        
-        return false; // Let BMDevice handle these
+    // Update LightShow's primary palette based on BMDevice's current palette
+    lightShow.setPrimaryPalette(state.currentPalette);
+    
+    // Update LightShow's secondary palette based on our secondary palette setting
+    if (!secondaryPaletteOff) {
+        lightShow.setSecondaryPalette(currentSecondaryPaletteId);
     }
     
-    // Handle secondary palette separately
-    if (feature == 0x09) {  // Secondary palette
-        Serial.printf("🎨 [SECONDARY PALETTE] Received secondary palette command! Length: %d\n", length);
-        // Print raw data for debugging
-        Serial.print("🎨 [SECONDARY PALETTE] Raw data: ");
-        for (size_t i = 0; i < length; i++) {
-            Serial.printf("0x%02X ", data[i]);
-        }
-        Serial.println();
-        
-        // Extract palette name from data
+    // Now get the updated palettes from LightShow
+    std::pair<CRGBPalette16, CRGBPalette16> palettes = lightShow.getPrimarySecondaryPalettes();
+    primaryPalette = palettes.first;
+    secondaryPalette = palettes.second;
+    
+    Serial.printf("🎨 [PALETTE UPDATE] Primary: %s, Secondary: %s (Off: %s)\n",
+                 LightShow::paletteIdToName(state.currentPalette),
+                 LightShow::paletteIdToName(currentSecondaryPaletteId),
+                 secondaryPaletteOff ? "true" : "false");
+}
+
+// === SOUND FEATURE HANDLER ===
+bool handleSoundFeatures(uint8_t feature, const uint8_t* data, size_t length) {
+    Serial.printf("🔧 [SOUND FEATURE] Received: 0x%02X, length: %d\n", feature, length);
+    
+    // Let BMDevice handle standard features - CORRECTED FEATURE CODES
+    if (feature == 0x01 || feature == 0x04 || feature == 0x05 || 
+        feature == 0x06 || feature == 0x08 || feature == 0x0A) {
+        return false; // BMDevice handles these
+    }
+    
+    // Handle secondary palette
+    if (feature == 0x09) {
         if (length > 1) {
             std::string paletteName(reinterpret_cast<const char*>(data + 1), length - 1);
-            Serial.printf("🎨 [SECONDARY PALETTE] Setting secondary palette to: %s\n", paletteName.c_str());
+            Serial.printf("🎨 [SECONDARY PALETTE] Setting to: %s\n", paletteName.c_str());
             
-            // Check if secondary palette is being set to "off"
             if (paletteName == "off") {
                 secondaryPaletteOff = true;
-                Serial.printf("🎨 [SECONDARY PALETTE] Secondary palette set to OFF mode\n");
+                Serial.println("🎨 [SECONDARY PALETTE] Set to OFF mode");
             } else {
                 secondaryPaletteOff = false;
-                
-                // Convert string to AvailablePalettes enum
                 AvailablePalettes paletteEnum = LightShow::paletteNameToId(paletteName.c_str());
-                
-                // Set the secondary palette in BMDevice
-                LightShow& lightShow = device.getLightShow();
-                lightShow.setSecondaryPalette(paletteEnum);
-                
-                // Store the current secondary palette ID for status updates
                 currentSecondaryPaletteId = paletteEnum;
-                
-                // Update our local palettes immediately
-                updateLocalPalettes();
+                // Update LightShow's secondary palette and get the updated palettes
+                updatePalettesFromBMDevice();
             }
-            
-            Serial.printf("✅ Secondary palette set successfully\n");
-            
-            // Send immediate status update to show the change
-            sendUmbrellaStatusUpdate();
-            
             return true;
         }
-        Serial.println("❌ Secondary palette: Invalid length");
         return false;
     }
     
+    // Handle sound-specific features
     switch (feature) {
         case 0x03: // Sensitivity
             if (length >= sizeof(int)) {
                 int sensitivity = 0;
-                memcpy(&sensitivity, data + 1, sizeof(int)); // Fix: skip feature byte
+                memcpy(&sensitivity, data + 1, sizeof(int));
                 soundSettings.reference = log10(sensitivity);
-                Serial.print("✅ Sound Sensitivity: ");
-                Serial.println(sensitivity);
+                Serial.printf("✅ Sensitivity: %d\n", sensitivity);
                 return true;
             }
-            Serial.println("❌ Sensitivity: Invalid length");
             break;
             
         case 0x07: // Sound Sensitivity on/off
-            if (length >= 2) { // Fix: need at least 2 bytes (feature + data)
-                soundSettings.soundSensitive = data[1] != 0; // Fix: read data[1], not data[0]
-                Serial.print("✅ Sound Sensitive: ");
-                Serial.println(soundSettings.soundSensitive ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.soundSensitive = data[1] != 0;
+                Serial.printf("✅ Sound Mode: %s\n", soundSettings.soundSensitive ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Sound Sensitive: Invalid length");
             break;
             
-        case 0x0A: // Save Settings - Add back
-            Serial.println("✅ Save Settings command received");
-            // TODO: Add save settings functionality if needed
-            return true;
-            
         case 0x0B: // Amplitude
-            if (length >= sizeof(int) + 1) { // Fix: account for feature byte
-                memcpy(&soundSettings.amplitude, data + 1, sizeof(int)); // Fix: skip feature byte
-                Serial.print("✅ Amplitude: ");
-                Serial.println(soundSettings.amplitude);
+            if (length >= sizeof(int) + 1) {
+                memcpy(&soundSettings.amplitude, data + 1, sizeof(int));
+                Serial.printf("✅ Amplitude: %d\n", soundSettings.amplitude);
                 return true;
             }
-            Serial.println("❌ Amplitude: Invalid length");
             break;
             
         case 0x0C: // Noise Threshold
-            if (length >= sizeof(int) + 1) { // Fix: account for feature byte
-                memcpy(&soundSettings.noiseThreshold, data + 1, sizeof(int)); // Fix: skip feature byte
-                Serial.print("✅ Noise Threshold: ");
-                Serial.println(soundSettings.noiseThreshold);
+            if (length >= sizeof(int) + 1) {
+                memcpy(&soundSettings.noiseThreshold, data + 1, sizeof(int));
+                Serial.printf("✅ Noise Threshold: %d\n", soundSettings.noiseThreshold);
                 return true;
             }
-            Serial.println("❌ Noise Threshold: Invalid length");
             break;
             
         case 0x0D: // Decay
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.decay = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Decay: ");
-                Serial.println(soundSettings.decay ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.decay = data[1] != 0;
+                Serial.printf("✅ Decay: %s\n", soundSettings.decay ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Decay: Invalid length");
             break;
             
         case 0x0E: // Decay Rate
-            if (length >= sizeof(int) + 1) { // Fix: account for feature byte
-                memcpy(&soundSettings.decayRate, data + 1, sizeof(int)); // Fix: skip feature byte
-                Serial.print("✅ Decay Rate: ");
-                Serial.println(soundSettings.decayRate);
+            if (length >= sizeof(int) + 1) {
+                memcpy(&soundSettings.decayRate, data + 1, sizeof(int));
+                Serial.printf("✅ Decay Rate: %d\n", soundSettings.decayRate);
                 return true;
             }
-            Serial.println("❌ Decay Rate: Invalid length");
             break;
             
         case 0x0F: // Peak Hold On/Off
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.peakHold = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Peak Hold: ");
-                Serial.println(soundSettings.peakHold ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.peakHold = data[1] != 0;
+                Serial.printf("✅ Peak Hold: %s\n", soundSettings.peakHold ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Peak Hold: Invalid length");
             break;
             
         case 0x10: // Peak Hold Time
-            if (length >= sizeof(int) + 1) { // Fix: account for feature byte
-                memcpy(&soundSettings.peakHoldTime, data + 1, sizeof(int)); // Fix: skip feature byte
-                Serial.print("✅ Peak Hold Time: ");
-                Serial.println(soundSettings.peakHoldTime);
+            if (length >= sizeof(int) + 1) {
+                memcpy(&soundSettings.peakHoldTime, data + 1, sizeof(int));
+                Serial.printf("✅ Peak Hold Time: %d\n", soundSettings.peakHoldTime);
                 return true;
             }
-            Serial.println("❌ Peak Hold Time: Invalid length");
             break;
             
         case 0x11: // Smoothing On/Off
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.smoothing = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Smoothing: ");
-                Serial.println(soundSettings.smoothing ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.smoothing = data[1] != 0;
+                Serial.printf("✅ Smoothing: %s\n", soundSettings.smoothing ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Smoothing: Invalid length");
             break;
             
         case 0x12: // Smoothing Factor
-            if (length >= sizeof(float) + 1) { // Fix: account for feature byte
-                memcpy(&soundSettings.smoothingFactor, data + 1, sizeof(float)); // Fix: skip feature byte
-                Serial.print("✅ Smoothing Factor: ");
-                Serial.println(soundSettings.smoothingFactor);
+            if (length >= sizeof(float) + 1) {
+                memcpy(&soundSettings.smoothingFactor, data + 1, sizeof(float));
+                Serial.printf("✅ Smoothing Factor: %.2f\n", soundSettings.smoothingFactor);
                 return true;
             }
-            Serial.println("❌ Smoothing Factor: Invalid length");
             break;
             
         case 0x13: // Bar Mode
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.barMode = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Visual Mode: ");
-                Serial.println(soundSettings.barMode ? "Bars" : "Dots");
+            if (length >= 2) {
+                soundSettings.barMode = data[1] != 0;
+                Serial.printf("✅ Visual Mode: %s\n", soundSettings.barMode ? "Bars" : "Dots");
                 return true;
             }
-            Serial.println("❌ Bar Mode: Invalid length");
             break;
             
         case 0x14: // Rainbow Mode
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.rainbowMode = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Rainbow Mode: ");
-                Serial.println(soundSettings.rainbowMode ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.rainbowMode = data[1] != 0;
+                Serial.printf("✅ Rainbow Mode: %s\n", soundSettings.rainbowMode ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Rainbow Mode: Invalid length");
             break;
             
         case 0x15: // Color Speed
-            if (length >= sizeof(int) + 1) { // Fix: account for feature byte
-                memcpy(&soundSettings.colorSpeed, data + 1, sizeof(int)); // Fix: skip feature byte
-                Serial.print("✅ Color Speed: ");
-                Serial.println(soundSettings.colorSpeed);
+            if (length >= sizeof(int) + 1) {
+                memcpy(&soundSettings.colorSpeed, data + 1, sizeof(int));
+                Serial.printf("✅ Color Speed: %d\n", soundSettings.colorSpeed);
                 return true;
             }
-            Serial.println("❌ Color Speed: Invalid length");
             break;
             
         case 0x16: // Intensity Mapping
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.intensityMapping = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Intensity Mapping: ");
-                Serial.println(soundSettings.intensityMapping ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.intensityMapping = data[1] != 0;
+                Serial.printf("✅ Intensity Mapping: %s\n", soundSettings.intensityMapping ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Intensity Mapping: Invalid length");
             break;
             
         case 0x17: // Beat Detection
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.beatDetection = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Beat Detection: ");
-                Serial.println(soundSettings.beatDetection ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.beatDetection = data[1] != 0;
+                Serial.printf("✅ Beat Detection: %s\n", soundSettings.beatDetection ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Beat Detection: Invalid length");
             break;
             
         case 0x18: // Beat Sensitivity
-            if (length >= sizeof(int) + 1) { // Fix: account for feature byte
-                memcpy(&soundSettings.beatSensitivity, data + 1, sizeof(int)); // Fix: skip feature byte
-                Serial.print("✅ Beat Sensitivity: ");
-                Serial.println(soundSettings.beatSensitivity);
+            if (length >= sizeof(int) + 1) {
+                memcpy(&soundSettings.beatSensitivity, data + 1, sizeof(int));
+                Serial.printf("✅ Beat Sensitivity: %d\n", soundSettings.beatSensitivity);
                 return true;
             }
-            Serial.println("❌ Beat Sensitivity: Invalid length");
             break;
             
         case 0x19: // Strobe on Beat
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.strobeOnBeat = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Strobe on Beat: ");
-                Serial.println(soundSettings.strobeOnBeat ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.strobeOnBeat = data[1] != 0;
+                Serial.printf("✅ Strobe on Beat: %s\n", soundSettings.strobeOnBeat ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Strobe on Beat: Invalid length");
             break;
             
         case 0x21: // Pulse on Beat
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.pulseOnBeat = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Pulse on Beat: ");
-                Serial.println(soundSettings.pulseOnBeat ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.pulseOnBeat = data[1] != 0;
+                Serial.printf("✅ Pulse on Beat: %s\n", soundSettings.pulseOnBeat ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Pulse on Beat: Invalid length");
             break;
             
         case 0x22: // Bass Emphasis
-            if (length >= sizeof(int) + 1) { // Fix: account for feature byte
-                memcpy(&soundSettings.bassEmphasis, data + 1, sizeof(int)); // Fix: skip feature byte
-                Serial.print("✅ Bass Emphasis: ");
-                Serial.println(soundSettings.bassEmphasis);
+            if (length >= sizeof(int) + 1) {
+                memcpy(&soundSettings.bassEmphasis, data + 1, sizeof(int));
+                Serial.printf("✅ Bass Emphasis: %d\n", soundSettings.bassEmphasis);
                 return true;
             }
-            Serial.println("❌ Bass Emphasis: Invalid length");
             break;
             
         case 0x23: // Mid Emphasis
-            if (length >= sizeof(int) + 1) { // Fix: account for feature byte
-                memcpy(&soundSettings.midEmphasis, data + 1, sizeof(int)); // Fix: skip feature byte
-                Serial.print("✅ Mid Emphasis: ");
-                Serial.println(soundSettings.midEmphasis);
+            if (length >= sizeof(int) + 1) {
+                memcpy(&soundSettings.midEmphasis, data + 1, sizeof(int));
+                Serial.printf("✅ Mid Emphasis: %d\n", soundSettings.midEmphasis);
                 return true;
             }
-            Serial.println("❌ Mid Emphasis: Invalid length");
             break;
             
         case 0x24: // Treble Emphasis
-            if (length >= sizeof(int) + 1) { // Fix: account for feature byte
-                memcpy(&soundSettings.trebleEmphasis, data + 1, sizeof(int)); // Fix: skip feature byte
-                Serial.print("✅ Treble Emphasis: ");
-                Serial.println(soundSettings.trebleEmphasis);
+            if (length >= sizeof(int) + 1) {
+                memcpy(&soundSettings.trebleEmphasis, data + 1, sizeof(int));
+                Serial.printf("✅ Treble Emphasis: %d\n", soundSettings.trebleEmphasis);
                 return true;
             }
-            Serial.println("❌ Treble Emphasis: Invalid length");
             break;
             
         case 0x25: // Logarithmic Mapping
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.logarithmicMapping = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Logarithmic Mapping: ");
-                Serial.println(soundSettings.logarithmicMapping ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.logarithmicMapping = data[1] != 0;
+                Serial.printf("✅ Logarithmic Mapping: %s\n", soundSettings.logarithmicMapping ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Logarithmic Mapping: Invalid length");
             break;
             
         case 0x26: // Auto Gain
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.autoGain = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Auto Gain: ");
-                Serial.println(soundSettings.autoGain ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.autoGain = data[1] != 0;
+                Serial.printf("✅ Auto Gain: %s\n", soundSettings.autoGain ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Auto Gain: Invalid length");
             break;
             
         case 0x27: // Ambient Compensation
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.ambientCompensation = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Ambient Compensation: ");
-                Serial.println(soundSettings.ambientCompensation ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.ambientCompensation = data[1] != 0;
+                Serial.printf("✅ Ambient Compensation: %s\n", soundSettings.ambientCompensation ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Ambient Compensation: Invalid length");
             break;
             
         case 0x28: // Strip Mapping
-            if (length >= sizeof(int) + 1) { // Fix: account for feature byte
-                memcpy(&soundSettings.stripMapping, data + 1, sizeof(int)); // Fix: skip feature byte
-                Serial.print("✅ Strip Mapping: ");
-                Serial.println(soundSettings.stripMapping);
+            if (length >= sizeof(int) + 1) {
+                memcpy(&soundSettings.stripMapping, data + 1, sizeof(int));
+                Serial.printf("✅ Strip Mapping: %d\n", soundSettings.stripMapping);
                 return true;
             }
-            Serial.println("❌ Strip Mapping: Invalid length");
             break;
             
         case 0x29: // Individual Directions
-            if (length >= 2) { // Fix: need at least 2 bytes
-                soundSettings.individualDirections = data[1] != 0; // Fix: read data[1]
-                Serial.print("✅ Individual Directions: ");
-                Serial.println(soundSettings.individualDirections ? "On" : "Off");
+            if (length >= 2) {
+                soundSettings.individualDirections = data[1] != 0;
+                Serial.printf("✅ Individual Directions: %s\n", soundSettings.individualDirections ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Individual Directions: Invalid length");
             break;
             
         // NEW ADVANCED FEATURES
@@ -483,188 +389,134 @@ bool handleSoundFeatures(uint8_t feature, const uint8_t* data, size_t length) {
             if (length >= sizeof(int) + 1) {
                 int newFreq = 0;
                 memcpy(&newFreq, data + 1, sizeof(int));
-                newFreq = constrain(newFreq, 8000, 96000); // Reasonable range
+                newFreq = constrain(newFreq, 8000, 96000);
                 soundSettings.samplingFrequency = newFreq;
-                Serial.print("✅ Sampling Frequency: ");
-                Serial.println(newFreq);
+                Serial.printf("✅ Sampling Frequency: %d\n", newFreq);
                 reinitializeI2S(newFreq);
                 return true;
             }
-            Serial.println("❌ Sampling Frequency: Invalid length");
             break;
             
         case 0x2B: // Sample Count
             if (length >= sizeof(int) + 1) {
                 int newCount = 0;
                 memcpy(&newCount, data + 1, sizeof(int));
-                // Ensure power of 2 and reasonable range
                 newCount = constrain(newCount, 64, 2048);
                 // Round to nearest power of 2
                 int powerOf2 = 1;
                 while (powerOf2 < newCount) powerOf2 <<= 1;
                 soundSettings.sampleCount = powerOf2;
-                Serial.print("✅ Sample Count: ");
-                Serial.println(powerOf2);
+                Serial.printf("✅ Sample Count: %d\n", powerOf2);
                 initializeFFT(soundSettings.sampleCount, soundSettings.samplingFrequency);
                 return true;
             }
-            Serial.println("❌ Sample Count: Invalid length");
             break;
             
         case 0x2C: // Gain Multiplier
             if (length >= sizeof(float) + 1) {
                 memcpy(&soundSettings.gainMultiplier, data + 1, sizeof(float));
                 soundSettings.gainMultiplier = constrain(soundSettings.gainMultiplier, 0.1f, 10.0f);
-                Serial.print("✅ Gain Multiplier: ");
-                Serial.println(soundSettings.gainMultiplier);
+                Serial.printf("✅ Gain Multiplier: %.2f\n", soundSettings.gainMultiplier);
                 return true;
             }
-            Serial.println("❌ Gain Multiplier: Invalid length");
             break;
             
         case 0x2D: // Min LEDs
             if (length >= sizeof(int) + 1) {
                 memcpy(&soundSettings.minLEDs, data + 1, sizeof(int));
                 soundSettings.minLEDs = constrain(soundSettings.minLEDs, 0, LEDS_PER_STRIP);
-                Serial.print("✅ Min LEDs: ");
-                Serial.println(soundSettings.minLEDs);
+                Serial.printf("✅ Min LEDs: %d\n", soundSettings.minLEDs);
                 return true;
             }
-            Serial.println("❌ Min LEDs: Invalid length");
             break;
             
         case 0x2E: // Max LEDs
             if (length >= sizeof(int) + 1) {
                 memcpy(&soundSettings.maxLEDs, data + 1, sizeof(int));
                 soundSettings.maxLEDs = constrain(soundSettings.maxLEDs, 1, LEDS_PER_STRIP);
-                Serial.print("✅ Max LEDs: ");
-                Serial.println(soundSettings.maxLEDs);
+                Serial.printf("✅ Max LEDs: %d\n", soundSettings.maxLEDs);
                 return true;
             }
-            Serial.println("❌ Max LEDs: Invalid length");
             break;
             
         case 0x2F: // Frequency Min
             if (length >= sizeof(int) + 1) {
                 memcpy(&soundSettings.frequencyMin, data + 1, sizeof(int));
                 soundSettings.frequencyMin = constrain(soundSettings.frequencyMin, 20, 10000);
-                Serial.print("✅ Frequency Min: ");
-                Serial.println(soundSettings.frequencyMin);
+                Serial.printf("✅ Frequency Min: %d\n", soundSettings.frequencyMin);
                 return true;
             }
-            Serial.println("❌ Frequency Min: Invalid length");
             break;
             
         case 0x30: // Frequency Max
             if (length >= sizeof(int) + 1) {
                 memcpy(&soundSettings.frequencyMax, data + 1, sizeof(int));
                 soundSettings.frequencyMax = constrain(soundSettings.frequencyMax, 100, 20000);
-                Serial.print("✅ Frequency Max: ");
-                Serial.println(soundSettings.frequencyMax);
+                Serial.printf("✅ Frequency Max: %d\n", soundSettings.frequencyMax);
                 return true;
             }
-            Serial.println("❌ Frequency Max: Invalid length");
             break;
             
         case 0x31: // Double Height
             if (length >= 2) {
                 soundSettings.doubleHeight = data[1] != 0;
-                Serial.print("✅ Double Height: ");
-                Serial.println(soundSettings.doubleHeight ? "On" : "Off");
+                Serial.printf("✅ Double Height: %s\n", soundSettings.doubleHeight ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Double Height: Invalid length");
             break;
             
         case 0x32: // LED Multiplier
             if (length >= sizeof(float) + 1) {
                 memcpy(&soundSettings.ledMultiplier, data + 1, sizeof(float));
                 soundSettings.ledMultiplier = constrain(soundSettings.ledMultiplier, 0.1f, 5.0f);
-                Serial.print("✅ LED Multiplier: ");
-                Serial.println(soundSettings.ledMultiplier);
+                Serial.printf("✅ LED Multiplier: %.2f\n", soundSettings.ledMultiplier);
                 return true;
             }
-            Serial.println("❌ LED Multiplier: Invalid length");
             break;
             
         case 0x33: // Fill From Center
             if (length >= 2) {
                 soundSettings.fillFromCenter = data[1] != 0;
-                Serial.print("✅ Fill From Center: ");
-                Serial.println(soundSettings.fillFromCenter ? "On" : "Off");
+                Serial.printf("✅ Fill From Center: %s\n", soundSettings.fillFromCenter ? "ON" : "OFF");
                 return true;
             }
-            Serial.println("❌ Fill From Center: Invalid length");
             break;
             
         default:
-            Serial.printf("❓ Unknown custom feature: 0x%02X\n", feature);
-            return false; // Not handled
+            Serial.printf("❓ Unknown sound feature: 0x%02X\n", feature);
+            return false;
     }
-    return false; // Not handled
+    
+    Serial.printf("❌ Invalid data length for feature 0x%02X\n", feature);
+    return false;
 }
 
-// Connection handler to update palettes when device connects/disconnects
+// === CONNECTION HANDLER ===
 void handleConnectionChange(bool connected) {
-    Serial.printf("📡 [CONNECTION] Device %s\n", connected ? "CONNECTED" : "DISCONNECTED");
+    Serial.printf("📡 [CONNECTION] %s\n", connected ? "CONNECTED" : "DISCONNECTED");
     
     if (connected) {
-        // DON'T reset palettes on connection - just sync the local copies with BMDevice
-        updateLocalPalettes();
-        
-        // Keep secondaryPaletteOff as it was - don't reset it
-        Serial.printf("🎨 [CONNECTION] Palettes synced (no reset), SecondaryOff: %s\n", 
-                     secondaryPaletteOff ? "true" : "false");
-        
-        // Send custom umbrella status update with all sound settings
-        sendUmbrellaStatusUpdate();
+        updatePalettesFromBMDevice();
+        sendUmbrellaStatus();
     }
 }
 
-// Function to update local palettes from BMDevice
-void updateLocalPalettes() {
-    LightShow& lightShow = device.getLightShow();
-    std::pair<CRGBPalette16, CRGBPalette16> palettes = lightShow.getPrimarySecondaryPalettes();
-    primaryPalette = palettes.first;
-    secondaryPalette = palettes.second;
-    
-    BMDeviceState& state = device.getState();
-    // Note: currentSecondaryPaletteId is tracked separately since BMDeviceState doesn't track secondary palette
-    
-    Serial.printf("🎨 [PALETTE UPDATE] Primary: %s, Secondary: %s\n", 
-                 LightShow::paletteIdToName(state.currentPalette),
-                 LightShow::paletteIdToName(currentSecondaryPaletteId));
-}
-
+// === FFT INITIALIZATION ===
 void initializeFFT(int sampleCount, int samplingFreq) {
-    // Clean up existing FFT if it exists
     if (FFT) {
         delete FFT;
-        FFT = nullptr;
-    }
-    if (vReal) {
         delete[] vReal;
-        vReal = nullptr;
-    }
-    if (vImag) {
         delete[] vImag;
-        vImag = nullptr;
     }
     
-    // Allocate new arrays
     vReal = new double[sampleCount];
     vImag = new double[sampleCount];
-    
-    // Create new FFT instance
     FFT = new ArduinoFFT<double>(vReal, vImag, sampleCount, samplingFreq);
     
-    // Update current values
-    currentSampleCount = sampleCount;
-    currentSamplingFreq = samplingFreq;
-    
-    Serial.printf("FFT initialized: %d samples at %d Hz\n", sampleCount, samplingFreq);
+    Serial.printf("🎵 [FFT] Initialized: %d samples at %d Hz\n", sampleCount, samplingFreq);
 }
 
+// === I2S REINITIALIZATION ===
 void reinitializeI2S(int samplingFreq) {
     // Uninstall existing I2S driver
     i2s_driver_uninstall(I2S_PORT);
@@ -691,20 +543,20 @@ void reinitializeI2S(int samplingFreq) {
 
     esp_err_t err = i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
     if (err != ESP_OK) {
-        Serial.printf("I2S driver reinstall failed: %s\n", esp_err_to_name(err));
+        Serial.printf("❌ I2S driver reinstall failed: %s\n", esp_err_to_name(err));
         return;
     }
     i2s_set_pin(I2S_PORT, &pin_config);
     
     // Update current frequency and reinitialize FFT
-    currentSamplingFreq = samplingFreq;
-    initializeFFT(currentSampleCount, samplingFreq);
+    soundSettings.samplingFrequency = samplingFreq;
+    initializeFFT(soundSettings.sampleCount, samplingFreq);
     
-    Serial.printf("I2S reinitialized with sampling frequency: %d Hz\n", samplingFreq);
+    Serial.printf("🎤 I2S reinitialized with sampling frequency: %d Hz\n", samplingFreq);
 }
 
+// === I2S INITIALIZATION ===
 void initializeI2S() {
-    // I2S Microphone Configuration
     i2s_config_t i2s_config = {
         .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
         .sample_rate = (uint32_t)DEFAULT_SAMPLING_FREQ,
@@ -726,28 +578,29 @@ void initializeI2S() {
 
     esp_err_t err = i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
     if (err != ESP_OK) {
-        Serial.printf("I2S driver install failed: %s\n", esp_err_to_name(err));
+        Serial.printf("❌ I2S driver install failed: %s\n", esp_err_to_name(err));
         while (true);
     }
     i2s_set_pin(I2S_PORT, &pin_config);
-    Serial.println("I2S microphone initialized");
+    Serial.println("🎤 I2S microphone initialized");
 }
 
-void handleSoundAnalysis() {
+// === ADVANCED SOUND VISUALIZATION ===
+void handleSoundVisualization() {
     // Ensure FFT is initialized
     if (!FFT || !vReal || !vImag) {
-        Serial.println("FFT not initialized, skipping analysis");
+        Serial.println("❌ FFT not initialized, skipping analysis");
         return;
     }
 
     // Reset FFT arrays
-    for (int i = 0; i < currentSampleCount; i++) {
+    for (int i = 0; i < soundSettings.sampleCount; i++) {
         vReal[i] = 0;
         vImag[i] = 0;
     }
 
     // Sample audio from INMP441
-    for (int i = 0; i < currentSampleCount; i++) {
+    for (int i = 0; i < soundSettings.sampleCount; i++) {
         int16_t sample;
         size_t bytes_read;
         i2s_read(I2S_PORT, &sample, sizeof(sample), &bytes_read, portMAX_DELAY);
@@ -771,10 +624,10 @@ void handleSoundAnalysis() {
     bool reverseDirection = state.reverseStrip;
 
     // Calculate frequency range for analysis based on settings
-    int minFreqBin = (soundSettings.frequencyMin * currentSampleCount) / currentSamplingFreq;
-    int maxFreqBin = (soundSettings.frequencyMax * currentSampleCount) / currentSamplingFreq;
-    minFreqBin = constrain(minFreqBin, 2, currentSampleCount / 2);
-    maxFreqBin = constrain(maxFreqBin, minFreqBin + 1, currentSampleCount / 2);
+    int minFreqBin = (soundSettings.frequencyMin * soundSettings.sampleCount) / soundSettings.samplingFrequency;
+    int maxFreqBin = (soundSettings.frequencyMax * soundSettings.sampleCount) / soundSettings.samplingFrequency;
+    minFreqBin = constrain(minFreqBin, 2, soundSettings.sampleCount / 2);
+    maxFreqBin = constrain(maxFreqBin, minFreqBin + 1, soundSettings.sampleCount / 2);
     
     // Calculate overall volume for beat detection and auto-gain
     float totalVolume = 0;
@@ -792,7 +645,7 @@ void handleSoundAnalysis() {
         if (averageVolume > beatThreshold && (currentTime - lastBeatTime) > 100) { // 100ms minimum between beats
             beatDetected = true;
             lastBeatTime = currentTime;
-            Serial.println("Beat detected!");
+            Serial.println("🎵 Beat detected!");
         }
         previousAverage = averageVolume * 0.9 + previousAverage * 0.1; // Smooth average
     }
@@ -810,8 +663,7 @@ void handleSoundAnalysis() {
                 float gainAdjustment = targetAmplitude / recentMax;
                 soundSettings.amplitude = (int)(soundSettings.amplitude * gainAdjustment);
                 soundSettings.amplitude = constrain(soundSettings.amplitude, 100, 10000);
-                Serial.print("Auto-gain adjusted amplitude to: ");
-                Serial.println(soundSettings.amplitude);
+                Serial.printf("🔧 Auto-gain adjusted amplitude to: %d\n", soundSettings.amplitude);
             }
             recentMax *= 0.8; // Decay recent max
             lastGainAdjust = currentTime;
@@ -1033,6 +885,19 @@ void handleSoundAnalysis() {
     lightShow.render();
 }
 
+// === CHUNKED STATUS UPDATES ===
+enum StatusUpdateState {
+    STATUS_IDLE,
+    STATUS_START_BASIC,
+    STATUS_BASIC_SENT,
+    STATUS_SOUND_SENT,
+    STATUS_ADVANCED_SENT,
+    STATUS_SUPER_ADVANCED_SENT
+};
+StatusUpdateState statusUpdateState = STATUS_IDLE;
+unsigned long statusUpdateTimer = 0;
+const unsigned long STATUS_UPDATE_DELAY = 25; // 25ms delay between chunks
+
 // Function to send basic device status (core BMDevice info)
 void sendBasicStatus() {
     BMDeviceState& state = device.getState();
@@ -1070,8 +935,7 @@ void sendBasicStatus() {
     
     String basicStatus;
     serializeJson(doc, basicStatus);
-    Serial.print("🌂 [BASIC STATUS] Sending: ");
-    Serial.println(basicStatus);
+    Serial.printf("🌂 [BASIC STATUS] %s\n", basicStatus.c_str());
     
     BMBluetoothHandler& bluetoothHandler = device.getBluetoothHandler();
     bluetoothHandler.sendStatusUpdate(basicStatus);
@@ -1104,8 +968,7 @@ void sendSoundSettings() {
     
     String soundStatus;
     serializeJson(doc, soundStatus);
-    Serial.print("🔊 [SOUND SETTINGS] Sending: ");
-    Serial.println(soundStatus);
+    Serial.printf("🔊 [SOUND SETTINGS] %s\n", soundStatus.c_str());
     
     BMBluetoothHandler& bluetoothHandler = device.getBluetoothHandler();
     bluetoothHandler.sendStatusUpdate(soundStatus);
@@ -1141,8 +1004,7 @@ void sendAdvancedSoundSettings() {
     
     String advancedStatus;
     serializeJson(doc, advancedStatus);
-    Serial.print("🎛️ [ADVANCED SOUND] Sending: ");
-    Serial.println(advancedStatus);
+    Serial.printf("🎛️ [ADVANCED SOUND] %s\n", advancedStatus.c_str());
     
     BMBluetoothHandler& bluetoothHandler = device.getBluetoothHandler();
     bluetoothHandler.sendStatusUpdate(advancedStatus);
@@ -1174,14 +1036,13 @@ void sendSuperAdvancedSoundSettings() {
     
     String superAdvancedStatus;
     serializeJson(doc, superAdvancedStatus);
-    Serial.print("🚀 [SUPER ADVANCED SOUND] Sending: ");
-    Serial.println(superAdvancedStatus);
+    Serial.printf("🚀 [SUPER ADVANCED SOUND] %s\n", superAdvancedStatus.c_str());
     
     BMBluetoothHandler& bluetoothHandler = device.getBluetoothHandler();
     bluetoothHandler.sendStatusUpdate(superAdvancedStatus);
 }
 
-void sendUmbrellaStatusUpdate() {
+void sendUmbrellaStatus() {
     statusUpdateState = STATUS_START_BASIC;
     statusUpdateTimer = millis();
     Serial.println("🌂 [CHUNKED STATUS] Starting non-blocking chunked status update...");
@@ -1235,10 +1096,12 @@ void handleStatusUpdate() {
     }
 }
 
+// === SETUP ===
 void setup() {
     Serial.begin(115200);
+    Serial.println("🌂 BTUmbrellaV3 Starting...");
     
-    // Add all 8 LED strips using individual arrays
+    // Add LED strips to BMDevice (same pin order as original)
     device.addLEDStrip<WS2812B, 32, COLOR_ORDER>(leds0, LEDS_PER_STRIP);
     device.addLEDStrip<WS2812B, 33, COLOR_ORDER>(leds1, LEDS_PER_STRIP);
     device.addLEDStrip<WS2812B, 27, COLOR_ORDER>(leds2, LEDS_PER_STRIP);
@@ -1247,57 +1110,54 @@ void setup() {
     device.addLEDStrip<WS2812B, 13, COLOR_ORDER>(leds5, LEDS_PER_STRIP);
     device.addLEDStrip<WS2812B, 18, COLOR_ORDER>(leds6, LEDS_PER_STRIP);
     device.addLEDStrip<WS2812B, 5, COLOR_ORDER>(leds7, LEDS_PER_STRIP);
-
     
-    // Set custom feature handler for sound-specific commands
+    // Set handlers
     device.setCustomFeatureHandler(handleSoundFeatures);
-    
-    // Set connection handler to update palettes
     device.setCustomConnectionHandler(handleConnectionChange);
     
-    // Initialize I2S microphone
+    // Initialize hardware
     initializeI2S();
-    
-    // Initialize FFT with default settings
     initializeFFT(DEFAULT_SAMPLES, DEFAULT_SAMPLING_FREQ);
     
-    // Start the BMDevice
+    // Start BMDevice
     if (!device.begin()) {
         Serial.println("❌ Failed to initialize BMDevice!");
         while (1);
     }
     
-    // Set umbrella-specific defaults
-    BMDeviceDefaults& defaults = device.getDefaults();
+    // Initialize palettes - make sure LightShow palettes are synchronized with BMDevice
+    updatePalettesFromBMDevice();
     
-    // Initialize palettes
-    LightShow& lightShow = device.getLightShow();
-    std::pair<CRGBPalette16, CRGBPalette16> palettes = lightShow.getPrimarySecondaryPalettes();
-    primaryPalette = palettes.first;
-    secondaryPalette = palettes.second;
-    
-    Serial.println("✅ Umbrella BMDevice setup complete!");
-    Serial.printf("🎵 Initial sound mode: %s\n", soundSettings.soundSensitive ? "ON" : "OFF");
-    defaults.printCurrentDefaults();
+    Serial.println("✅ BTUmbrellaV3 Ready!");
+    Serial.printf("🎵 Sound Mode: %s\n", soundSettings.soundSensitive ? "ON" : "OFF");
+    Serial.printf("🎨 Primary Palette: %s\n", LightShow::paletteIdToName(device.getState().currentPalette));
+    Serial.printf("🎨 Secondary Palette: %s (Off: %s)\n", 
+                 LightShow::paletteIdToName(currentSecondaryPaletteId),
+                 secondaryPaletteOff ? "true" : "false");
 }
 
+// === MAIN LOOP ===
 void loop() {
-
+    // Poll bluetooth
     BMBluetoothHandler& bluetoothHandler = device.getBluetoothHandler();
     bluetoothHandler.poll();
     
+    // Handle chunked status updates
     handleStatusUpdate();
 
+    // Get current state
     BMDeviceState& state = device.getState();
 
+    // Send periodic status updates
     static unsigned long lastStatusUpdate = 0;
     unsigned long statusUpdateInterval = 5000; 
     
     if ((millis() - lastStatusUpdate) > statusUpdateInterval && bluetoothHandler.isConnected()) {
-        sendUmbrellaStatusUpdate(); 
+        sendUmbrellaStatus(); 
         lastStatusUpdate = millis();
     }
     
+    // Debug power state changes
     static bool lastPowerState = true;
     if (state.power != lastPowerState) {
         Serial.printf("🔋 [POWER DEBUG] Power changed: %s -> %s\n", 
@@ -1306,24 +1166,25 @@ void loop() {
         lastPowerState = state.power;
     }
     
-    // Check if primary palette has changed and update local copies
+    // Check for palette updates
     static AvailablePalettes lastPrimaryPalette = state.currentPalette;
-    
     if (state.currentPalette != lastPrimaryPalette) {
         Serial.printf("🎨 [PALETTE CHANGE] Primary: %s->%s\n",
                      LightShow::paletteIdToName(lastPrimaryPalette),
                      LightShow::paletteIdToName(state.currentPalette));
         
-        updateLocalPalettes();
+        updatePalettesFromBMDevice();
         lastPrimaryPalette = state.currentPalette;
     }
     
+    // Handle power off
     if (!state.power) {
         FastLED.clear();
         FastLED.show();
         return;
     }
     
+    // Debug status
     static unsigned long lastDebugPrint = 0;
     if (millis() - lastDebugPrint > 5000) {  // Every 5 seconds
         Serial.printf("🎵 [STATUS] Power: %s, SoundMode: %s\n", 
@@ -1332,37 +1193,30 @@ void loop() {
         lastDebugPrint = millis();
     }
     
+    // Main visualization logic
     if (soundSettings.soundSensitive) {
-        handleSoundAnalysis();
-        return;
-    }
-    else {
+        handleSoundVisualization();
+    } else {
+        // Use BMDevice light shows when not in sound mode
         LightShow& lightShow = device.getLightShow();
         lightShow.render();
-        return;
     }
 }
 
 // Available BLE Commands (inherited from BMDevice + custom):
 // Standard BMDevice commands:
 // 0x01 - Set primary palette
-// 0x02 - Set lighting mode/scene
-// 0x05 - Set direction
+// 0x04 - Set brightness  
+// 0x05 - Set speed
 // 0x06 - Set power on/off
-// 0x08 - Set speed
-// 0x09 - Set brightness
-// 0x1A - Get current defaults
-// 0x1B - Set defaults from JSON
-// 0x1C - Save current state as defaults
-// 0x1D - Reset to factory defaults
-// 0x1E - Set max brightness limit
-// 0x1F - Set device owner
-// 0x20 - Set auto-on behavior
+// 0x08 - Set direction
+// 0x0A - Set lighting effect
 //
 // Custom Umbrella sound commands:
 // Basic Sound Controls:
 // 0x03 - Set sensitivity (int)
 // 0x07 - Set sound sensitivity on/off (bool)
+// 0x09 - Set secondary palette (string: palette name or "off")
 // 0x0B - Set amplitude (int)
 // 0x0C - Set noise threshold (int)
 // 0x0D - Set decay on/off (bool)
@@ -1398,7 +1252,7 @@ void loop() {
 // 0x28 - Strip mapping: 0=normal, 1=bass-treble, 2=treble-bass, 3=center-out (int)
 // 0x29 - Individual directions on/off (bool)
 //
-// NEW Advanced Audio Controls:
+// Advanced Audio Controls:
 // 0x2A - Sampling frequency 8000-96000 Hz (int)
 // 0x2B - Sample count 64-2048 (power of 2) (int)
 // 0x2C - Gain multiplier 0.1-10.0 (float)
@@ -1410,7 +1264,7 @@ void loop() {
 // 0x32 - LED multiplier 0.1-5.0 (float)
 // 0x33 - Fill from center on/off (bool)
 //
-// Your Enhanced Umbrella Music Visualizer now has:
+// BTUmbrellaV3 now includes ALL advanced sound analysis features:
 // - Full BMDevice integration with shared palettes and light shows
 // - Advanced FFT sound analysis for 8 LED strips with configurable sampling
 // - Beat detection with strobe and pulse effects
@@ -1429,7 +1283,7 @@ void loop() {
 // - Frequency filtering (customizable Hz ranges)
 // - Double height mode for dramatic effect
 // - All standard BLE commands from BMDevice
-// - 32 custom sound-specific BLE commands (0x03-0x33)
+// - 31 custom sound-specific BLE commands (0x03-0x33)
 // - Persistent defaults that survive reboots
 // - Automatic 4-part chunked status reporting
 // - Power management
