@@ -1,7 +1,11 @@
-#ifndef __INC_FL_PROGMEM_H
-#define __INC_FL_PROGMEM_H
+#pragma once
 
-#include "FastLED.h"
+#if defined(__EMSCRIPTEN__) || defined(FASTLED_TESTING) || defined(FASTLED_STUB_IMPL)
+#include "platforms/null_progmem.h"
+#else
+
+
+#include "fl/namespace.h"
 
 /// @file fastled_progmem.h
 /// Wrapper definitions to allow seamless use of PROGMEM in environments that have it
@@ -16,7 +20,6 @@
 /// Whether or not pgmspace.h is \#included is separately
 /// controllable by FASTLED_INCLUDE_PGMSPACE, if needed.
 
-FASTLED_NAMESPACE_BEGIN
 
 
 // This block is used for Doxygen documentation generation,
@@ -24,7 +27,6 @@ FASTLED_NAMESPACE_BEGIN
 // included without a defined platform
 #ifdef FASTLED_DOXYGEN
 #define FASTLED_USE_PROGMEM 1
-#define FL_ALIGN_PROGMEM  __attribute__ ((aligned (4)))
 #endif
 
 /// @def FASTLED_USE_PROGMEM
@@ -33,7 +35,7 @@ FASTLED_NAMESPACE_BEGIN
 /// and the FL_PGM_* accessors to the Arduino equivalents.
 
 
-#if FASTLED_USE_PROGMEM == 1
+#if (FASTLED_USE_PROGMEM == 1) || defined(FASTLED_DOXYGEN)
 #ifndef FASTLED_INCLUDE_PGMSPACE
 #define FASTLED_INCLUDE_PGMSPACE 1
 #endif
@@ -78,11 +80,7 @@ FASTLED_NAMESPACE_BEGIN
 // If FASTLED_USE_PROGMEM is 0 or undefined,
 // we'll use regular memory (RAM) access.
 
-//empty PROGMEM simulation
-#define FL_PROGMEM
-#define FL_PGM_READ_BYTE_NEAR(x)  (*((const  uint8_t*)(x)))
-#define FL_PGM_READ_WORD_NEAR(x)  (*((const uint16_t*)(x)))
-#define FL_PGM_READ_DWORD_NEAR(x) (*((const uint32_t*)(x)))
+#include "platforms/null_progmem.h"
 
 #endif
 
@@ -96,13 +94,12 @@ FASTLED_NAMESPACE_BEGIN
 /// palette code uses 'read dword', and now uses this macro
 /// to make sure that gradient palettes are 4-byte aligned.
 
-#if defined(FASTLED_ARM) || defined(ESP32) || defined(ESP8266)
+#ifndef FL_ALIGN_PROGMEM
+#if defined(FASTLED_ARM) || defined(ESP32) || defined(ESP8266) || defined(FASTLED_DOXYGEN)
 #define FL_ALIGN_PROGMEM  __attribute__ ((aligned (4)))
 #else
 #define FL_ALIGN_PROGMEM
 #endif
-
-
-FASTLED_NAMESPACE_END
-
 #endif
+
+#endif  // defined(__EMSCRIPTEN__) || defined(FASTLED_TESTING) || defined(FASTLED_STUB_IMPL)

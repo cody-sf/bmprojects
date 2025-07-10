@@ -1,6 +1,17 @@
 #pragma once
 
+#include <stdint.h>
+
+#include "fl/register.h"
+#include "fl/namespace.h"
+#include "platforms/esp/esp_version.h"
+#include "fastpin.h"
+
 FASTLED_NAMESPACE_BEGIN
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wvolatile"
 
 template<uint8_t PIN, uint32_t MASK, bool VALIDPIN> class _ESPPIN {
 public:
@@ -102,16 +113,29 @@ public:
 // NOTE: GPIO 43 & 44 commonly used for UART and may cause flashes when uploading.
 #define FASTLED_UNUSABLE_PIN_MASK (0ULL | _FL_BIT(27) | _FL_BIT(28) | _FL_BIT(29) | _FL_BIT(30) | _FL_BIT(31) | _FL_BIT(32))
 
+#elif CONFIG_IDF_TARGET_ESP32C6
+
+// GPIO 20-22, 24-26 used by default for SPI flash.
+#define FASTLED_UNUSABLE_PIN_MASK (0ULL |  _FL_BIT(24) | _FL_BIT(25) | _FL_BIT(26) | _FL_BIT(28) | _FL_BIT(29) | _FL_BIT(30))
+
+#elif CONFIG_IDF_TARGET_ESP32P4
+// 55 GPIO pins. ESPIDF defines all pins as valid.
+// NOTE: GPIO 24 & 25 commonly used for USB and may cause flashes when uploading.
+#define FASTLED_UNUSABLE_PIN_MASK (0ULL | _FL_BIT(24) | _FL_BIT(25))
+
 #elif CONFIG_IDF_TARGET_ESP32H2
 // 22 GPIO pins.  ESPIDF defines all pins as valid.
 // ESP32-H2 datasheet not yet available, when it is, mask the pins commonly used by SPI flash.
 #warning ESP32-H2 chip flash configuration not yet known.  Only pins defined by ESP-IDF will be masked.
 #define FASTLED_UNUSABLE_PIN_MASK (0ULL)
-
+#elif CONFIG_IDF_TARGET_ESP32C2
+#warning ESP32-C2 chip variant is in beta support.  Only pins defined by ESP-IDF will be masked.
+#define FASTLED_UNUSABLE_PIN_MASK (0ULL)
 #else
 #warning Unknown ESP32 chip variant.  Only pins defined by ESP-IDF will be masked.
 #define FASTLED_UNUSABLE_PIN_MASK (0ULL)
 #endif
+
 
 #endif
 
@@ -155,5 +179,7 @@ _FL_DEFPIN(56); _FL_DEFPIN(57); _FL_DEFPIN(58); _FL_DEFPIN(59);
 _FL_DEFPIN(60); _FL_DEFPIN(61); _FL_DEFPIN(62); _FL_DEFPIN(63);
 
 #define HAS_HARDWARE_PIN_SUPPORT
+
+#pragma GCC diagnostic pop
 
 FASTLED_NAMESPACE_END

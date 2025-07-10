@@ -1,3 +1,5 @@
+#pragma once
+
 /// @file fastspi_nop.h
 /// Example of a NOP/stub class to show the SPI methods required by a chipset implementation
 /// @note Example for developers. Not a functional part of the library.
@@ -61,7 +63,7 @@ public:
 	template <uint8_t BIT> inline static void writeBit(uint8_t b) { /* TODO */ }
 
 	/// write out pixel data from the given PixelController object
-	template <uint8_t FLAGS, class D, EOrder RGB_ORDER> void writePixels(PixelController<RGB_ORDER> pixels) { /* TODO */ }
+	template <uint8_t FLAGS, class D, EOrder RGB_ORDER> void writePixels(PixelController<RGB_ORDER> pixels, void* context = NULL) { /* TODO */ }
 
 };
 

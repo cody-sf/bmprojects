@@ -1,20 +1,31 @@
 /// @file noise.cpp
 /// Functions to generate and fill arrays with noise.
 
+#include <string.h>
+#include "fl/array.h"
+
+
 /// Disables pragma messages and warnings
 #define FASTLED_INTERNAL
 #include "FastLED.h"
-#include <string.h>
+
 
 // Compiler throws a warning about stack usage possibly being unbounded even
 // though bounds are checked, silence that so users don't see it
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstack-usage="
+#if defined(__GNUC__) && (__GNUC__ >= 6)
+  #pragma GCC diagnostic ignored "-Wstack-usage="
+#else
+  #pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#endif
 
-FASTLED_NAMESPACE_BEGIN
+
 
 /// Reads a single byte from the p array
 #define P(x) FL_PGM_READ_BYTE_NEAR(p + x)
+
+FASTLED_NAMESPACE_BEGIN
+
 
 FL_PROGMEM static uint8_t const p[] = {
     151, 160, 137,  91,  90,  15, 131,  13, 201,  95,  96,  53, 194, 233,   7, 225,
@@ -345,6 +356,101 @@ int16_t inoise16_raw(uint32_t x, uint32_t y, uint32_t z)
     int16_t ans = LERP(Y1,Y2,w);
 
     return ans;
+}
+
+int16_t inoise16_raw(uint32_t x, uint32_t y, uint32_t z, uint32_t t) {
+    // 1. Extract the integer (grid) parts.
+    uint8_t X = (x >> 16) & 0xFF;
+    uint8_t Y = (y >> 16) & 0xFF;
+    uint8_t Z = (z >> 16) & 0xFF;
+    uint8_t T = (t >> 16) & 0xFF;
+
+    // 2. Extract the fractional parts.
+    uint16_t u = x & 0xFFFF;
+    uint16_t v = y & 0xFFFF;
+    uint16_t w = z & 0xFFFF;
+    uint16_t s = t & 0xFFFF;
+
+    // 3. Easing of the fractional parts.
+    u = EASE16(u);
+    v = EASE16(v);
+    w = EASE16(w);
+    s = EASE16(s);
+
+    uint16_t N = 0x8000L; // fixed-point half-scale
+
+    // 4. Precompute fixed-point versions for the gradient evaluations.
+    int16_t xx = (u >> 1) & 0x7FFF;
+    int16_t yy = (v >> 1) & 0x7FFF;
+    int16_t zz = (w >> 1) & 0x7FFF;
+
+    // 5. Hash the 3D cube corners (the “base” for both t slices).
+    uint8_t A = P(X) + Y;
+    uint8_t AA = P(A) + Z;
+    uint8_t AB = P(A + 1) + Z;
+    uint8_t B = P(X + 1) + Y;
+    uint8_t BA = P(B) + Z;
+    uint8_t BB = P(B + 1) + Z;
+
+    // 6. --- Lower t Slice (using T) ---
+    uint8_t AAA = P(AA) + T;
+    uint8_t AAB = P(AA + 1) + T;
+    uint8_t ABA = P(AB) + T;
+    uint8_t ABB = P(AB + 1) + T;
+    uint8_t BAA = P(BA) + T;
+    uint8_t BAB = P(BA + 1) + T;
+    uint8_t BBA = P(BB) + T;
+    uint8_t BBB = P(BB + 1) + T;
+
+    int16_t L1 = LERP(grad16(AAA, xx, yy, zz),     grad16(BAA, xx - N, yy, zz), u);
+    int16_t L2 = LERP(grad16(ABA, xx, yy - N, zz),  grad16(BBA, xx - N, yy - N, zz), u);
+    int16_t L3 = LERP(grad16(AAB, xx, yy, zz - N),  grad16(BAB, xx - N, yy, zz - N), u);
+    int16_t L4 = LERP(grad16(ABB, xx, yy - N, zz - N),  grad16(BBB, xx - N, yy - N, zz - N), u);
+
+    int16_t Y1 = LERP(L1, L2, v);
+    int16_t Y2 = LERP(L3, L4, v);
+    int16_t noise_lower = LERP(Y1, Y2, w);
+
+    // 7. --- Upper t Slice (using T+1) ---
+    uint8_t Tupper = T + 1;
+    uint8_t AAA_u = P(AA) + Tupper;
+    uint8_t AAB_u = P(AA + 1) + Tupper;
+    uint8_t ABA_u = P(AB) + Tupper;
+    uint8_t ABB_u = P(AB + 1) + Tupper;
+    uint8_t BAA_u = P(BA) + Tupper;
+    uint8_t BAB_u = P(BA + 1) + Tupper;
+    uint8_t BBA_u = P(BB) + Tupper;
+    uint8_t BBB_u = P(BB + 1) + Tupper;
+
+    int16_t U1 = LERP(grad16(AAA_u, xx, yy, zz),     grad16(BAA_u, xx - N, yy, zz), u);
+    int16_t U2 = LERP(grad16(ABA_u, xx, yy - N, zz),  grad16(BBA_u, xx - N, yy - N, zz), u);
+    int16_t U3 = LERP(grad16(AAB_u, xx, yy, zz - N),  grad16(BAB_u, xx - N, yy, zz - N), u);
+    int16_t U4 = LERP(grad16(ABB_u, xx, yy - N, zz - N),  grad16(BBB_u, xx - N, yy - N, zz - N), u);
+
+    int16_t V1 = LERP(U1, U2, v);
+    int16_t V2 = LERP(U3, U4, v);
+    int16_t noise_upper = LERP(V1, V2, w);
+
+    // 8. Final interpolation in the t dimension.
+    int16_t noise4d = LERP(noise_lower, noise_upper, s);
+
+    return noise4d;
+}
+
+uint16_t inoise16(uint32_t x, uint32_t y, uint32_t z, uint32_t t) {
+    int32_t ans = inoise16_raw(x,y,z,t);
+    ans = ans + 19052L;
+    uint32_t pan = ans;
+    // pan = (ans * 220L) >> 7.  That's the same as:
+    // pan = (ans * 440L) >> 8.  And this way avoids a 7X four-byte shift-loop on AVR.
+    // Identical math, except for the highest bit, which we don't care about anyway,
+    // since we're returning the 'middle' 16 out of a 32-bit value anyway.
+    pan *= 440L;
+    return (pan>>8);
+
+    // return scale16by8(pan,220)<<1;
+    // return ((inoise16_raw(x,y,z)+19052)*220)>>7;
+    // return scale16by8(inoise16_raw(x,y,z)+19052,220)<<1;
 }
 
 uint16_t inoise16(uint32_t x, uint32_t y, uint32_t z) {
@@ -747,8 +853,9 @@ void fill_noise8(CRGB *leds, int num_leds,
         const int LedsRemaining = num_leds - j;
         const int LedsPer = LedsRemaining > 255 ? 255 : LedsRemaining;  // limit to 255 max
 
-        uint8_t V[LedsPer];
-        uint8_t H[LedsPer];
+        if (LedsPer <= 0) continue;
+        FASTLED_STACK_ARRAY(uint8_t, V, LedsPer);
+        FASTLED_STACK_ARRAY(uint8_t, H, LedsPer);
 
         memset(V, 0, LedsPer);
         memset(H, 0, LedsPer);
@@ -772,9 +879,9 @@ void fill_noise16(CRGB *leds, int num_leds,
     for (int j = 0; j < num_leds; j += 255) {
         const int LedsRemaining = num_leds - j;
         const int LedsPer = LedsRemaining > 255 ? 255 : LedsRemaining;  // limit to 255 max
-
-        uint8_t V[LedsPer];
-        uint8_t H[LedsPer];
+        if (LedsPer <= 0) continue;
+        FASTLED_STACK_ARRAY(uint8_t, V, LedsPer);
+        FASTLED_STACK_ARRAY(uint8_t, H, LedsPer);
 
         memset(V, 0, LedsPer);
         memset(H, 0, LedsPer);
@@ -791,8 +898,10 @@ void fill_noise16(CRGB *leds, int num_leds,
 void fill_2dnoise8(CRGB *leds, int width, int height, bool serpentine,
             uint8_t octaves, uint16_t x, int xscale, uint16_t y, int yscale, uint16_t time,
             uint8_t hue_octaves, uint16_t hue_x, int hue_xscale, uint16_t hue_y, uint16_t hue_yscale,uint16_t hue_time,bool blend) {
-  uint8_t V[height][width];
-  uint8_t H[height][width];
+  const size_t array_size = (size_t)height * width;
+  if (array_size <= 0) return;
+  FASTLED_STACK_ARRAY(uint8_t, V, array_size);
+  FASTLED_STACK_ARRAY(uint8_t, H, array_size);
 
   memset(V,0,height*width);
   memset(H,0,height*width);
@@ -805,7 +914,7 @@ void fill_2dnoise8(CRGB *leds, int width, int height, bool serpentine,
   for(int i = 0; i < height; ++i) {
     int wb = i*width;
     for(int j = 0; j < width; ++j) {
-      CRGB led(CHSV(H[h1-i][w1-j],255,V[i][j]));
+      CRGB led(CHSV(H[(h1-i)*width + (w1-j)], 255, V[i*width + j]));
 
       int pos = j;
       if(serpentine && (i & 0x1)) {
@@ -813,7 +922,11 @@ void fill_2dnoise8(CRGB *leds, int width, int height, bool serpentine,
       }
 
       if(blend) {
-        leds[wb+pos] >>= 1; leds[wb+pos] += (led>>=1);
+        // Safer blending to avoid potential undefined behavior
+        CRGB temp = leds[wb+pos];
+        temp.nscale8(128); // Scale by 50%
+        led.nscale8(128);
+        leds[wb+pos] = temp + led;
       } else {
         leds[wb+pos] = led;
       }
@@ -821,12 +934,14 @@ void fill_2dnoise8(CRGB *leds, int width, int height, bool serpentine,
   }
 }
 
+
 void fill_2dnoise16(CRGB *leds, int width, int height, bool serpentine,
             uint8_t octaves, uint32_t x, int xscale, uint32_t y, int yscale, uint32_t time,
             uint8_t hue_octaves, uint16_t hue_x, int hue_xscale, uint16_t hue_y, uint16_t hue_yscale,uint16_t hue_time, bool blend, uint16_t hue_shift) {
-  uint8_t V[height][width];
-  uint8_t H[height][width];
 
+  FASTLED_STACK_ARRAY(uint8_t, V, height*width);
+  FASTLED_STACK_ARRAY(uint8_t, H, height*width);
+  
   memset(V,0,height*width);
   memset(H,0,height*width);
 
@@ -843,7 +958,7 @@ void fill_2dnoise16(CRGB *leds, int width, int height, bool serpentine,
   for(int i = 0; i < height; ++i) {
     int wb = i*width;
     for(int j = 0; j < width; ++j) {
-      CRGB led(CHSV(hue_shift + (H[h1-i][w1-j]),196,V[i][j]));
+      CRGB led(CHSV(hue_shift + (H[(h1-i)*width + (w1-j)]), 196, V[i*width + j]));
 
       int pos = j;
       if(serpentine && (i & 0x1)) {

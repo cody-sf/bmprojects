@@ -6,7 +6,7 @@
 // ESP32 C6 = 7
 #define LED_PIN 17
 // #define NUM_LEDS 350
-#define NUM_LEDS 600
+#define NUM_LEDS 1000
 #define COLOR_ORDER GRB
 
 // BLE Configuration - Using original service UUID and new status UUID
@@ -18,7 +18,7 @@
 CRGB leds[NUM_LEDS];
 
 // Create BMDevice - CowboyHat with no GPS support
-BMDevice device("CowboyHat-AY", SERVICE_UUID, FEATURES_UUID, STATUS_UUID);
+BMDevice device("CowboyHat-CL", SERVICE_UUID, FEATURES_UUID, STATUS_UUID);
 
 void setup() {
     Serial.begin(115200);

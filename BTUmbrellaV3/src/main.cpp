@@ -12,7 +12,7 @@
 // BLE Configuration - Same UUIDs as original
 #define SERVICE_UUID "87748abc-e491-43a1-92bd-20b94ba20df4"
 #define FEATURES_UUID "e06544bc-1989-4c0b-9ada-8cd4491d23a5"
-#define STATUS_UUID "8d78c901-7dc0-4e1b-9ac9-34731a1ccf49"
+#define STATUS_UUID "0b95cc9e-288e-49d2-a2aa-7230ed489ec8"
 
 // Sound Analysis Configuration
 #define DEFAULT_SAMPLES 256
