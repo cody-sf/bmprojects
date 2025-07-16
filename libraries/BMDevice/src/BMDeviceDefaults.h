@@ -7,6 +7,22 @@
 #include <FastLED.h>
 #include <LightShow.h>
 
+#define MAX_LED_STRIPS 8
+
+struct LEDStripConfig {
+    int pin;
+    int numLeds;
+    int colorOrder; // 0=GRB, 1=RGB, 2=BRG, 3=BGR, 4=RBG, 5=GBR
+    bool enabled;
+    
+    LEDStripConfig() {
+        pin = 2;
+        numLeds = 30;
+        colorOrder = 0; // GRB
+        enabled = false;
+    }
+};
+
 #define DEFAULTS_NAMESPACE "bmdefaults"
 #define DEFAULTS_VERSION 1
 
@@ -26,6 +42,10 @@
 #define PREF_EFFECT_COLOR_B "effectColorB"
 #define PREF_GPS_ENABLED "gpsEnabled"
 #define PREF_VERSION "version"
+#define PREF_DEVICE_TYPE "deviceType"
+#define PREF_LED_COUNT "ledCount"
+#define PREF_LED_PINS "ledPins"
+#define PREF_COLOR_ORDERS "colorOrders"
 
 struct DeviceDefaults {
     // Core settings
@@ -39,6 +59,11 @@ struct DeviceDefaults {
     // Device identity
     String owner;
     String deviceName;
+    String deviceType;
+    
+    // LED configuration
+    LEDStripConfig ledStrips[MAX_LED_STRIPS];
+    int activeLEDStrips;
     
     // Behavior settings
     bool autoOn;
@@ -60,9 +85,18 @@ struct DeviceDefaults {
         palette = AvailablePalettes::cool;
         effect = LightSceneID::palette_stream;
         reverseDirection = true;
-        owner = "Unknown";
+        owner = "New";
         deviceName = "BMDevice";
+        deviceType = "Generic";
         autoOn = true;
+        
+        // Initialize LED strips
+        activeLEDStrips = 1;
+        for (int i = 0; i < MAX_LED_STRIPS; i++) {
+            ledStrips[i] = LEDStripConfig();
+            ledStrips[i].pin = 2 + i;
+            ledStrips[i].enabled = (i == 0); // Only first strip enabled by default
+        }
         statusUpdateInterval = 5000;
         effectColor = CRGB::Green;
         gpsEnabled = false;
@@ -93,7 +127,14 @@ public:
     bool setDirection(bool reverse);
     bool setOwner(const String& owner);
     bool setDeviceName(const String& name);
+    bool setDeviceType(const String& deviceType);
     bool setAutoOn(bool autoOn);
+    
+    // LED strip configuration
+    bool setLEDStripConfig(int stripIndex, int pin, int numLeds, int colorOrder, bool enabled);
+    bool setActiveLEDStrips(int count);
+    LEDStripConfig getLEDStripConfig(int stripIndex);
+    int getActiveLEDStrips();
     bool setStatusInterval(unsigned long interval);
     bool setEffectColor(CRGB color);
     bool setGPSEnabled(bool enabled);

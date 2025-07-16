@@ -6,7 +6,7 @@ BMBluetoothHandler* BMBluetoothHandler::instance_ = nullptr;
 BMBluetoothHandler::BMBluetoothHandler(const char* deviceName, const char* serviceUUID, 
                                        const char* featuresUUID, const char* statusUUID)
     : deviceName_(deviceName), serviceUUID_(serviceUUID), featuresUUID_(featuresUUID), 
-      statusUUID_(statusUUID), deviceConnected_(false), lastBluetoothSync_(0),
+      statusUUID_(statusUUID), deviceConnected_(false), initialized_(false), lastBluetoothSync_(0),
       service_(nullptr), featuresCharacteristic_(nullptr), statusCharacteristic_(nullptr) {
     instance_ = this;
 }
@@ -37,6 +37,8 @@ bool BMBluetoothHandler::begin() {
     // Start advertising
     BLE.advertise();
     
+    initialized_ = true;
+    
     Serial.print("[BMBluetoothHandler] BLE initialized for device: ");
     Serial.println(deviceName_);
     
@@ -53,6 +55,23 @@ void BMBluetoothHandler::setFeatureCallback(std::function<void(uint8_t, const ui
 
 void BMBluetoothHandler::setConnectionCallback(std::function<void(bool)> callback) {
     connectionCallback_ = callback;
+}
+
+void BMBluetoothHandler::setDeviceName(const char* deviceName) {
+    deviceName_ = String(deviceName);
+    
+    // Only update BLE if it's already initialized
+    if (initialized_) {
+        // Update the BLE local name
+        BLE.setLocalName(deviceName_.c_str());
+        
+        // Stop and restart advertising to update the name
+        BLE.stopAdvertise();
+        BLE.advertise();
+    }
+    
+    Serial.print("[BMBluetoothHandler] Device name set to: ");
+    Serial.println(deviceName_);
 }
 
 void BMBluetoothHandler::sendStatusUpdate(const String& status) {

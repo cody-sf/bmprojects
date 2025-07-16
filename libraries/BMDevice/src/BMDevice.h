@@ -20,6 +20,7 @@
 class BMDevice {
 public:
     BMDevice(const char* deviceName, const char* serviceUUID, const char* featuresUUID, const char* statusUUID);
+    BMDevice(const char* serviceUUID, const char* featuresUUID, const char* statusUUID); // Constructor for dynamic naming
     ~BMDevice();
     
     // LED Strip Management
@@ -89,6 +90,10 @@ private:
     std::function<bool(uint8_t, const uint8_t*, size_t)> customFeatureHandler_;
     std::function<void(bool)> customConnectionHandler_;
     
+    // LED strip management
+    CRGB* ledArrays_[MAX_LED_STRIPS];
+    bool dynamicNaming_;
+    
     // Internal methods
     void handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size_t length);
     void handleConnectionChange(bool connected);
@@ -115,6 +120,16 @@ private:
     void handleSetMaxBrightnessFeature(const uint8_t* buffer, size_t length);
     void handleSetDeviceOwnerFeature(const uint8_t* buffer, size_t length);
     void handleSetAutoOnFeature(const uint8_t* buffer, size_t length);
+    
+    // Generic device configuration handlers
+    void handleSetDeviceTypeFeature(const uint8_t* buffer, size_t length);
+    void handleConfigureLEDStripFeature(const uint8_t* buffer, size_t length);
+    void handleGetConfigurationFeature(const uint8_t* buffer, size_t length);
+    void handleResetToDefaultsFeature(const uint8_t* buffer, size_t length);
+    
+    // LED strip management
+    void addLEDStripByPin(int pin, CRGB* ledArray, int numLeds, int colorOrder);
+    void initializeLEDStrips();
 };
 
 #endif // BM_DEVICE_H 

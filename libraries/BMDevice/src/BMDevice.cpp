@@ -15,12 +15,41 @@ BMDevice::BMDevice(const char* deviceName, const char* serviceUUID, const char* 
     });
 }
 
+BMDevice::BMDevice(const char* serviceUUID, const char* featuresUUID, const char* statusUUID)
+    : bluetoothHandler_("", serviceUUID, featuresUUID, statusUUID), lightShow_(std::vector<CLEDController*>(), deviceClock_),
+      gpsEnabled_(false), ownGPSSerial_(false), gps_(nullptr), gpsSerial_(nullptr), 
+      locationService_(nullptr), lastBluetoothSync_(0), statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL),
+      dynamicNaming_(true) {
+    
+    // Initialize LED arrays
+    for (int i = 0; i < MAX_LED_STRIPS; i++) {
+        ledArrays_[i] = nullptr;
+    }
+    
+    // Set up callbacks
+    bluetoothHandler_.setFeatureCallback([this](uint8_t feature, const uint8_t* data, size_t length) {
+        this->handleFeatureCommand(feature, data, length);
+    });
+    
+    bluetoothHandler_.setConnectionCallback([this](bool connected) {
+        this->handleConnectionChange(connected);
+    });
+}
+
 BMDevice::~BMDevice() {
     if (ownGPSSerial_ && gpsSerial_) {
         delete gpsSerial_;
     }
     if (gps_) {
         delete gps_;
+    }
+    
+    // Clean up LED arrays
+    for (int i = 0; i < MAX_LED_STRIPS; i++) {
+        if (ledArrays_[i]) {
+            delete[] ledArrays_[i];
+            ledArrays_[i] = nullptr;
+        }
     }
 }
 
@@ -64,6 +93,28 @@ bool BMDevice::begin() {
         Serial.println("[BMDevice] Loaded and applied defaults");
     } else {
         Serial.println("[BMDevice] Using factory defaults");
+    }
+    
+    // Handle dynamic naming
+    if (dynamicNaming_) {
+        DeviceDefaults currentDefaults = defaults_.getCurrentDefaults();
+        String deviceName;
+        if (currentDefaults.owner.length() > 0) {
+            deviceName = "BMDevice - " + currentDefaults.owner;
+        } else {
+            deviceName = "BMDevice - New";
+        }
+        
+        Serial.print("[BMDevice] Dynamic device name: ");
+        Serial.println(deviceName);
+        
+        // Update the Bluetooth handler with the new name
+        bluetoothHandler_.setDeviceName(deviceName.c_str());
+    }
+    
+    // Initialize LED strips from configuration (if using dynamic constructor)
+    if (dynamicNaming_) {
+        initializeLEDStrips();
     }
     
     // Initialize Bluetooth
@@ -199,6 +250,23 @@ void BMDevice::handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size
             break;
         case BLE_FEATURE_SET_AUTO_ON:
             handleSetAutoOnFeature(buffer, length);
+            break;
+        
+        // Generic device configuration commands
+        case BLE_FEATURE_SET_OWNER:
+            handleSetDeviceOwnerFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_DEVICE_TYPE:
+            handleSetDeviceTypeFeature(buffer, length);
+            break;
+        case BLE_FEATURE_CONFIGURE_LED_STRIP:
+            handleConfigureLEDStripFeature(buffer, length);
+            break;
+        case BLE_FEATURE_GET_CONFIGURATION:
+            handleGetConfigurationFeature(buffer, length);
+            break;
+        case BLE_FEATURE_RESET_TO_DEFAULTS:
+            handleResetToDefaultsFeature(buffer, length);
             break;
             
         default:
@@ -643,5 +711,198 @@ void BMDevice::handleSetAutoOnFeature(const uint8_t* buffer, size_t length) {
             Serial.print("[BMDevice] Auto-on set to: ");
             Serial.println(autoOn ? "true" : "false");
         }
+    }
+}
+
+void BMDevice::handleSetDeviceTypeFeature(const uint8_t* buffer, size_t length) {
+    if (length > 1) {
+        String deviceType = String((char*)(buffer + 1), length - 1);
+        bool success = defaults_.setDeviceType(deviceType);
+        if (success) {
+            Serial.print("[BMDevice] Device type set to: ");
+            Serial.println(deviceType);
+        }
+    }
+}
+
+void BMDevice::handleConfigureLEDStripFeature(const uint8_t* buffer, size_t length) {
+    if (length >= 6) { // stripIndex(1) + pin(1) + numLeds(2) + colorOrder(1) + enabled(1)
+        int stripIndex = buffer[1];
+        int pin = buffer[2];
+        int numLeds = (buffer[3] << 8) | buffer[4];
+        int colorOrder = buffer[5];
+        bool enabled = length > 6 ? buffer[6] > 0 : true;
+        
+        bool success = defaults_.setLEDStripConfig(stripIndex, pin, numLeds, colorOrder, enabled);
+        if (success) {
+            Serial.printf("[BMDevice] LED strip %d configured: Pin %d, %d LEDs, Color order %d, %s\n", 
+                         stripIndex, pin, numLeds, colorOrder, enabled ? "enabled" : "disabled");
+        }
+    }
+}
+
+void BMDevice::handleGetConfigurationFeature(const uint8_t* buffer, size_t length) {
+    // Send configuration as JSON via status notification
+    StaticJsonDocument<2048> doc;
+    DeviceDefaults defaults = defaults_.getCurrentDefaults();
+    
+    doc["owner"] = defaults.owner;
+    doc["deviceType"] = defaults.deviceType;
+    doc["activeLEDStrips"] = defaults.activeLEDStrips;
+    
+    JsonArray strips = doc.createNestedArray("ledStrips");
+    for (int i = 0; i < defaults.activeLEDStrips; i++) {
+        JsonObject strip = strips.createNestedObject();
+        strip["pin"] = defaults.ledStrips[i].pin;
+        strip["numLeds"] = defaults.ledStrips[i].numLeds;
+        strip["colorOrder"] = defaults.ledStrips[i].colorOrder;
+        strip["enabled"] = defaults.ledStrips[i].enabled;
+    }
+    
+    String configJson;
+    serializeJson(doc, configJson);
+    
+    bluetoothHandler_.sendStatusUpdate(configJson);
+    Serial.println("[BMDevice] Configuration sent via BLE");
+}
+
+void BMDevice::handleResetToDefaultsFeature(const uint8_t* buffer, size_t length) {
+    bool success = resetToFactoryDefaults();
+    
+    String response = success ? "{\"factoryReset\":true}" : "{\"factoryReset\":false}";
+    bluetoothHandler_.sendStatusUpdate(response);
+    
+    Serial.println(success ? "[BMDevice] Reset to factory defaults" : "[BMDevice] Failed to reset to factory defaults");
+}
+
+void BMDevice::addLEDStripByPin(int pin, CRGB* ledArray, int numLeds, int colorOrder) {
+    // Handle different pins at compile time due to FastLED template requirements
+    switch (pin) {
+        case 2:
+            switch (colorOrder) {
+                case 0: addLEDStrip<WS2812B, 2, GRB>(ledArray, numLeds); break;
+                case 1: addLEDStrip<WS2812B, 2, RGB>(ledArray, numLeds); break;
+                case 2: addLEDStrip<WS2812B, 2, BRG>(ledArray, numLeds); break;
+                case 3: addLEDStrip<WS2812B, 2, BGR>(ledArray, numLeds); break;
+                case 4: addLEDStrip<WS2812B, 2, RBG>(ledArray, numLeds); break;
+                case 5: addLEDStrip<WS2812B, 2, GBR>(ledArray, numLeds); break;
+                default: addLEDStrip<WS2812B, 2, GRB>(ledArray, numLeds); break;
+            }
+            break;
+        case 4:
+            switch (colorOrder) {
+                case 0: addLEDStrip<WS2812B, 4, GRB>(ledArray, numLeds); break;
+                case 1: addLEDStrip<WS2812B, 4, RGB>(ledArray, numLeds); break;
+                case 2: addLEDStrip<WS2812B, 4, BRG>(ledArray, numLeds); break;
+                case 3: addLEDStrip<WS2812B, 4, BGR>(ledArray, numLeds); break;
+                case 4: addLEDStrip<WS2812B, 4, RBG>(ledArray, numLeds); break;
+                case 5: addLEDStrip<WS2812B, 4, GBR>(ledArray, numLeds); break;
+                default: addLEDStrip<WS2812B, 4, GRB>(ledArray, numLeds); break;
+            }
+            break;
+        case 5:
+            switch (colorOrder) {
+                case 0: addLEDStrip<WS2812B, 5, GRB>(ledArray, numLeds); break;
+                case 1: addLEDStrip<WS2812B, 5, RGB>(ledArray, numLeds); break;
+                case 2: addLEDStrip<WS2812B, 5, BRG>(ledArray, numLeds); break;
+                case 3: addLEDStrip<WS2812B, 5, BGR>(ledArray, numLeds); break;
+                case 4: addLEDStrip<WS2812B, 5, RBG>(ledArray, numLeds); break;
+                case 5: addLEDStrip<WS2812B, 5, GBR>(ledArray, numLeds); break;
+                default: addLEDStrip<WS2812B, 5, GRB>(ledArray, numLeds); break;
+            }
+            break;
+        case 16:
+            switch (colorOrder) {
+                case 0: addLEDStrip<WS2812B, 16, GRB>(ledArray, numLeds); break;
+                case 1: addLEDStrip<WS2812B, 16, RGB>(ledArray, numLeds); break;
+                case 2: addLEDStrip<WS2812B, 16, BRG>(ledArray, numLeds); break;
+                case 3: addLEDStrip<WS2812B, 16, BGR>(ledArray, numLeds); break;
+                case 4: addLEDStrip<WS2812B, 16, RBG>(ledArray, numLeds); break;
+                case 5: addLEDStrip<WS2812B, 16, GBR>(ledArray, numLeds); break;
+                default: addLEDStrip<WS2812B, 16, GRB>(ledArray, numLeds); break;
+            }
+            break;
+        case 17:
+            switch (colorOrder) {
+                case 0: addLEDStrip<WS2812B, 17, GRB>(ledArray, numLeds); break;
+                case 1: addLEDStrip<WS2812B, 17, RGB>(ledArray, numLeds); break;
+                case 2: addLEDStrip<WS2812B, 17, BRG>(ledArray, numLeds); break;
+                case 3: addLEDStrip<WS2812B, 17, BGR>(ledArray, numLeds); break;
+                case 4: addLEDStrip<WS2812B, 17, RBG>(ledArray, numLeds); break;
+                case 5: addLEDStrip<WS2812B, 17, GBR>(ledArray, numLeds); break;
+                default: addLEDStrip<WS2812B, 17, GRB>(ledArray, numLeds); break;
+            }
+            break;
+        case 18:
+            switch (colorOrder) {
+                case 0: addLEDStrip<WS2812B, 18, GRB>(ledArray, numLeds); break;
+                case 1: addLEDStrip<WS2812B, 18, RGB>(ledArray, numLeds); break;
+                case 2: addLEDStrip<WS2812B, 18, BRG>(ledArray, numLeds); break;
+                case 3: addLEDStrip<WS2812B, 18, BGR>(ledArray, numLeds); break;
+                case 4: addLEDStrip<WS2812B, 18, RBG>(ledArray, numLeds); break;
+                case 5: addLEDStrip<WS2812B, 18, GBR>(ledArray, numLeds); break;
+                default: addLEDStrip<WS2812B, 18, GRB>(ledArray, numLeds); break;
+            }
+            break;
+        case 19:
+            switch (colorOrder) {
+                case 0: addLEDStrip<WS2812B, 19, GRB>(ledArray, numLeds); break;
+                case 1: addLEDStrip<WS2812B, 19, RGB>(ledArray, numLeds); break;
+                case 2: addLEDStrip<WS2812B, 19, BRG>(ledArray, numLeds); break;
+                case 3: addLEDStrip<WS2812B, 19, BGR>(ledArray, numLeds); break;
+                case 4: addLEDStrip<WS2812B, 19, RBG>(ledArray, numLeds); break;
+                case 5: addLEDStrip<WS2812B, 19, GBR>(ledArray, numLeds); break;
+                default: addLEDStrip<WS2812B, 19, GRB>(ledArray, numLeds); break;
+            }
+            break;
+        case 21:
+            switch (colorOrder) {
+                case 0: addLEDStrip<WS2812B, 21, GRB>(ledArray, numLeds); break;
+                case 1: addLEDStrip<WS2812B, 21, RGB>(ledArray, numLeds); break;
+                case 2: addLEDStrip<WS2812B, 21, BRG>(ledArray, numLeds); break;
+                case 3: addLEDStrip<WS2812B, 21, BGR>(ledArray, numLeds); break;
+                case 4: addLEDStrip<WS2812B, 21, RBG>(ledArray, numLeds); break;
+                case 5: addLEDStrip<WS2812B, 21, GBR>(ledArray, numLeds); break;
+                default: addLEDStrip<WS2812B, 21, GRB>(ledArray, numLeds); break;
+            }
+            break;
+        case 22:
+            switch (colorOrder) {
+                case 0: addLEDStrip<WS2812B, 22, GRB>(ledArray, numLeds); break;
+                case 1: addLEDStrip<WS2812B, 22, RGB>(ledArray, numLeds); break;
+                case 2: addLEDStrip<WS2812B, 22, BRG>(ledArray, numLeds); break;
+                case 3: addLEDStrip<WS2812B, 22, BGR>(ledArray, numLeds); break;
+                case 4: addLEDStrip<WS2812B, 22, RBG>(ledArray, numLeds); break;
+                case 5: addLEDStrip<WS2812B, 22, GBR>(ledArray, numLeds); break;
+                default: addLEDStrip<WS2812B, 22, GRB>(ledArray, numLeds); break;
+            }
+            break;
+        default:
+            Serial.printf("[BMDevice] Warning: Pin %d not supported. Using pin 2 as fallback.\n", pin);
+            addLEDStrip<WS2812B, 2, GRB>(ledArray, numLeds);
+            break;
+    }
+}
+
+void BMDevice::initializeLEDStrips() {
+    Serial.println("[BMDevice] Initializing LED strips...");
+    
+    DeviceDefaults defaults = defaults_.getCurrentDefaults();
+    
+    for (int i = 0; i < defaults.activeLEDStrips; i++) {
+        if (!defaults.ledStrips[i].enabled) continue;
+        
+        int pin = defaults.ledStrips[i].pin;
+        int numLeds = defaults.ledStrips[i].numLeds;
+        int colorOrder = defaults.ledStrips[i].colorOrder;
+        
+        // Allocate LED array
+        ledArrays_[i] = new CRGB[numLeds];
+        
+        // Add LED strip using our wrapper function
+        addLEDStripByPin(pin, ledArrays_[i], numLeds, colorOrder);
+        
+        Serial.printf("[BMDevice] LED Strip %d: Pin %d, %d LEDs, Color Order %d\n", 
+                     i, pin, numLeds, colorOrder);
     }
 } 
