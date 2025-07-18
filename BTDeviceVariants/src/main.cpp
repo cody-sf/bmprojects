@@ -75,6 +75,46 @@ void setup() {
         while (1);
     }
     
+    // Register device-specific status chunk for variant information
+    device.registerStatusChunk("deviceVariant", []() {
+        // Create device variant-specific status JSON with abbreviated keys
+        StaticJsonDocument<512> doc;
+        doc["type"] = "devVariant";
+        
+        // Device variant configuration - abbreviated keys
+        #if DEVICE_TYPE == COWBOY_HAT
+            doc["devType"] = "CowboyHat";
+            doc["pin"] = LED_PIN;
+            doc["leds"] = NUM_LEDS;
+            doc["order"] = "GRB";
+            doc["gps"] = false;
+            doc["base"] = DEVICE_NAME_BASE_COWBOY_HAT;
+        #elif DEVICE_TYPE == FANNYPACK
+            doc["devType"] = "Fannypack";
+            doc["pin"] = LED_PIN;
+            doc["leds"] = NUM_LEDS;
+            doc["order"] = "GRB";
+            doc["gps"] = false;
+            doc["base"] = DEVICE_NAME_BASE_FANNYPACK;
+        #endif
+        
+        // Device identification - abbreviated
+        doc["init"] = TOSTRING(USER_INITIALS);
+        doc["uuid"] = TOSTRING(DEVICE_UUID);
+        doc["name"] = DEVICE_NAME_FULL;
+        doc["svc"] = SERVICE_UUID;
+        doc["feat"] = FEATURES_UUID;
+        doc["stat"] = STATUS_UUID;
+        
+        String status;
+        serializeJson(doc, status);
+        Serial.printf("[DeviceVariant] Sending variant info: %s\n", status.c_str());
+        
+        // Get bluetooth handler and send the status
+        BMBluetoothHandler& bluetoothHandler = device.getBluetoothHandler();
+        bluetoothHandler.sendStatusUpdate(status);
+    }, "Device variant specific configuration and identification");
+    
     // Set device-specific defaults on first boot
     BMDeviceDefaults& defaults = device.getDefaults();
     

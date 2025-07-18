@@ -17,6 +17,20 @@
 #define DEFAULT_BT_REFRESH_INTERVAL 5000
 #define DEFAULT_GPS_BAUD 9600
 
+// Chunked status update system
+enum StatusUpdateState {
+    STATUS_IDLE,
+    STATUS_SENDING_CHUNKS
+};
+
+struct StatusChunk {
+    String type;
+    std::function<void()> sendFunction;
+    String description;
+};
+
+#define STATUS_UPDATE_DELAY 25  // 25ms delay between chunks
+
 class BMDevice {
 public:
     BMDevice(const char* deviceName, const char* serviceUUID, const char* featuresUUID, const char* statusUUID);
@@ -67,6 +81,11 @@ public:
     void setCustomFeatureHandler(std::function<bool(uint8_t feature, const uint8_t* data, size_t length)> handler);
     void setCustomConnectionHandler(std::function<void(bool connected)> handler);
     
+    // Chunked status update system
+    void registerStatusChunk(const String& type, std::function<void()> sendFunction, const String& description = "");
+    void startChunkedStatusUpdate();
+    void clearStatusChunks();
+    
 private:
     // Core components
     BMDeviceState deviceState_;
@@ -90,6 +109,12 @@ private:
     std::function<bool(uint8_t, const uint8_t*, size_t)> customFeatureHandler_;
     std::function<void(bool)> customConnectionHandler_;
     
+    // Chunked status update system
+    std::vector<StatusChunk> statusChunks_;
+    StatusUpdateState statusUpdateState_;
+    unsigned long statusUpdateTimer_;
+    size_t currentChunkIndex_;
+    
     // LED strip management
     CRGB* ledArrays_[MAX_LED_STRIPS];
     bool dynamicNaming_;
@@ -100,6 +125,14 @@ private:
     void updateGPS();
     void updateLightShow();
     void sendStatusUpdate();
+    
+    // Chunked status update methods
+    void handleChunkedStatusUpdate();
+    void sendBasicStatusChunk();
+    void sendDeviceConfigChunk();
+    void sendDefaultsChunk();
+    void sendEffectParametersChunk();
+    void initializeDefaultStatusChunks();
     
     // Feature handlers
     void handlePowerFeature(const uint8_t* buffer, size_t length);

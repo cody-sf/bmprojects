@@ -3,7 +3,8 @@
 BMDevice::BMDevice(const char* deviceName, const char* serviceUUID, const char* featuresUUID, const char* statusUUID)
     : bluetoothHandler_(deviceName, serviceUUID, featuresUUID, statusUUID), lightShow_(std::vector<CLEDController*>(), deviceClock_),
       gpsEnabled_(false), ownGPSSerial_(false), gps_(nullptr), gpsSerial_(nullptr), 
-      locationService_(nullptr), lastBluetoothSync_(0), statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL) {
+      locationService_(nullptr), lastBluetoothSync_(0), statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL),
+      statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0) {
     
     // Set up callbacks
     bluetoothHandler_.setFeatureCallback([this](uint8_t feature, const uint8_t* data, size_t length) {
@@ -19,7 +20,7 @@ BMDevice::BMDevice(const char* serviceUUID, const char* featuresUUID, const char
     : bluetoothHandler_("", serviceUUID, featuresUUID, statusUUID), lightShow_(std::vector<CLEDController*>(), deviceClock_),
       gpsEnabled_(false), ownGPSSerial_(false), gps_(nullptr), gpsSerial_(nullptr), 
       locationService_(nullptr), lastBluetoothSync_(0), statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL),
-      dynamicNaming_(true) {
+      dynamicNaming_(true), statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0) {
     
     // Initialize LED arrays
     for (int i = 0; i < MAX_LED_STRIPS; i++) {
@@ -128,6 +129,9 @@ bool BMDevice::begin() {
     // Update light show with initial state
     updateLightShow();
     
+    // Initialize default status chunks for all devices
+    initializeDefaultStatusChunks();
+    
     Serial.println("[BMDevice] Setup complete");
     return true;
 }
@@ -140,9 +144,12 @@ void BMDevice::loop() {
         updateGPS();
     }
     
-    // Send status updates
+    // Handle chunked status updates
+    handleChunkedStatusUpdate();
+    
+    // Send status updates (now triggers chunked updates)
     if ((millis() - lastBluetoothSync_) > statusUpdateInterval_ && bluetoothHandler_.isConnected()) {
-        sendStatusUpdate();
+        startChunkedStatusUpdate();
         lastBluetoothSync_ = millis();
     }
     
@@ -278,7 +285,7 @@ void BMDevice::handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size
 
 void BMDevice::handleConnectionChange(bool connected) {
     if (connected) {
-        sendStatusUpdate();
+        startChunkedStatusUpdate();
     }
     
     if (customConnectionHandler_) {
@@ -531,7 +538,64 @@ void BMDevice::handleEffectParameterFeature(uint8_t feature, const uint8_t* buff
                 Serial.print("[BMDevice] Trail length set to: ");
                 Serial.println(deviceState_.trailLength);
                 break;
-            // Add more cases as needed...
+            case BLE_FEATURE_HEAT_VARIANCE:
+                deviceState_.heatVariance = constrain(value, 1, 100);
+                Serial.print("[BMDevice] Heat variance set to: ");
+                Serial.println(deviceState_.heatVariance);
+                break;
+            case BLE_FEATURE_MIRROR_COUNT:
+                deviceState_.mirrorCount = constrain(value, 1, 10);
+                Serial.print("[BMDevice] Mirror count set to: ");
+                Serial.println(deviceState_.mirrorCount);
+                break;
+            case BLE_FEATURE_COMET_COUNT:
+                deviceState_.cometCount = constrain(value, 1, 10);
+                Serial.print("[BMDevice] Comet count set to: ");
+                Serial.println(deviceState_.cometCount);
+                break;
+            case BLE_FEATURE_DROP_RATE:
+                deviceState_.dropRate = constrain(value, 1, 100);
+                Serial.print("[BMDevice] Drop rate set to: ");
+                Serial.println(deviceState_.dropRate);
+                break;
+            case BLE_FEATURE_CLOUD_SCALE:
+                deviceState_.cloudScale = constrain(value, 1, 50);
+                Serial.print("[BMDevice] Cloud scale set to: ");
+                Serial.println(deviceState_.cloudScale);
+                break;
+            case BLE_FEATURE_BLOB_COUNT:
+                deviceState_.blobCount = constrain(value, 1, 20);
+                Serial.print("[BMDevice] Blob count set to: ");
+                Serial.println(deviceState_.blobCount);
+                break;
+            case BLE_FEATURE_WAVE_COUNT:
+                deviceState_.waveCount = constrain(value, 1, 15);
+                Serial.print("[BMDevice] Wave count set to: ");
+                Serial.println(deviceState_.waveCount);
+                break;
+            case BLE_FEATURE_FLASH_INTENSITY:
+                deviceState_.flashIntensity = constrain(value, 1, 100);
+                Serial.print("[BMDevice] Flash intensity set to: ");
+                Serial.println(deviceState_.flashIntensity);
+                break;
+            case BLE_FEATURE_FLASH_FREQUENCY:
+                deviceState_.flashFrequency = constrain(value, 100, 5000);
+                Serial.print("[BMDevice] Flash frequency set to: ");
+                Serial.println(deviceState_.flashFrequency);
+                break;
+            case BLE_FEATURE_EXPLOSION_SIZE:
+                deviceState_.explosionSize = constrain(value, 1, 50);
+                Serial.print("[BMDevice] Explosion size set to: ");
+                Serial.println(deviceState_.explosionSize);
+                break;
+            case BLE_FEATURE_SPIRAL_ARMS:
+                deviceState_.spiralArms = constrain(value, 1, 10);
+                Serial.print("[BMDevice] Spiral arms set to: ");
+                Serial.println(deviceState_.spiralArms);
+                break;
+            default:
+                Serial.printf("[BMDevice] Unknown effect parameter: 0x%02X\n", feature);
+                return;
         }
         updateLightShow();
     }
@@ -777,109 +841,48 @@ void BMDevice::handleResetToDefaultsFeature(const uint8_t* buffer, size_t length
 
 void BMDevice::addLEDStripByPin(int pin, CRGB* ledArray, int numLeds, int colorOrder) {
     // Handle different pins at compile time due to FastLED template requirements
+    // ONLY supporting the 8 specific pins for ESP32 WROOM
+    // Using GRB color order by default (colorOrder parameter ignored for now)
     switch (pin) {
-        case 2:
-            switch (colorOrder) {
-                case 0: addLEDStrip<WS2812B, 2, GRB>(ledArray, numLeds); break;
-                case 1: addLEDStrip<WS2812B, 2, RGB>(ledArray, numLeds); break;
-                case 2: addLEDStrip<WS2812B, 2, BRG>(ledArray, numLeds); break;
-                case 3: addLEDStrip<WS2812B, 2, BGR>(ledArray, numLeds); break;
-                case 4: addLEDStrip<WS2812B, 2, RBG>(ledArray, numLeds); break;
-                case 5: addLEDStrip<WS2812B, 2, GBR>(ledArray, numLeds); break;
-                default: addLEDStrip<WS2812B, 2, GRB>(ledArray, numLeds); break;
-            }
-            break;
-        case 4:
-            switch (colorOrder) {
-                case 0: addLEDStrip<WS2812B, 4, GRB>(ledArray, numLeds); break;
-                case 1: addLEDStrip<WS2812B, 4, RGB>(ledArray, numLeds); break;
-                case 2: addLEDStrip<WS2812B, 4, BRG>(ledArray, numLeds); break;
-                case 3: addLEDStrip<WS2812B, 4, BGR>(ledArray, numLeds); break;
-                case 4: addLEDStrip<WS2812B, 4, RBG>(ledArray, numLeds); break;
-                case 5: addLEDStrip<WS2812B, 4, GBR>(ledArray, numLeds); break;
-                default: addLEDStrip<WS2812B, 4, GRB>(ledArray, numLeds); break;
-            }
-            break;
         case 5:
-            switch (colorOrder) {
-                case 0: addLEDStrip<WS2812B, 5, GRB>(ledArray, numLeds); break;
-                case 1: addLEDStrip<WS2812B, 5, RGB>(ledArray, numLeds); break;
-                case 2: addLEDStrip<WS2812B, 5, BRG>(ledArray, numLeds); break;
-                case 3: addLEDStrip<WS2812B, 5, BGR>(ledArray, numLeds); break;
-                case 4: addLEDStrip<WS2812B, 5, RBG>(ledArray, numLeds); break;
-                case 5: addLEDStrip<WS2812B, 5, GBR>(ledArray, numLeds); break;
-                default: addLEDStrip<WS2812B, 5, GRB>(ledArray, numLeds); break;
-            }
+            addLEDStrip<WS2812B, 5, GRB>(ledArray, numLeds);
+            break;
+        case 12:
+            addLEDStrip<WS2812B, 12, GRB>(ledArray, numLeds);
+            break;
+        case 13:
+            addLEDStrip<WS2812B, 13, GRB>(ledArray, numLeds);
+            break;
+        case 14:
+            addLEDStrip<WS2812B, 14, GRB>(ledArray, numLeds);
             break;
         case 16:
-            switch (colorOrder) {
-                case 0: addLEDStrip<WS2812B, 16, GRB>(ledArray, numLeds); break;
-                case 1: addLEDStrip<WS2812B, 16, RGB>(ledArray, numLeds); break;
-                case 2: addLEDStrip<WS2812B, 16, BRG>(ledArray, numLeds); break;
-                case 3: addLEDStrip<WS2812B, 16, BGR>(ledArray, numLeds); break;
-                case 4: addLEDStrip<WS2812B, 16, RBG>(ledArray, numLeds); break;
-                case 5: addLEDStrip<WS2812B, 16, GBR>(ledArray, numLeds); break;
-                default: addLEDStrip<WS2812B, 16, GRB>(ledArray, numLeds); break;
-            }
+            addLEDStrip<WS2812B, 16, GRB>(ledArray, numLeds);
             break;
         case 17:
-            switch (colorOrder) {
-                case 0: addLEDStrip<WS2812B, 17, GRB>(ledArray, numLeds); break;
-                case 1: addLEDStrip<WS2812B, 17, RGB>(ledArray, numLeds); break;
-                case 2: addLEDStrip<WS2812B, 17, BRG>(ledArray, numLeds); break;
-                case 3: addLEDStrip<WS2812B, 17, BGR>(ledArray, numLeds); break;
-                case 4: addLEDStrip<WS2812B, 17, RBG>(ledArray, numLeds); break;
-                case 5: addLEDStrip<WS2812B, 17, GBR>(ledArray, numLeds); break;
-                default: addLEDStrip<WS2812B, 17, GRB>(ledArray, numLeds); break;
-            }
+            addLEDStrip<WS2812B, 17, GRB>(ledArray, numLeds);
             break;
         case 18:
-            switch (colorOrder) {
-                case 0: addLEDStrip<WS2812B, 18, GRB>(ledArray, numLeds); break;
-                case 1: addLEDStrip<WS2812B, 18, RGB>(ledArray, numLeds); break;
-                case 2: addLEDStrip<WS2812B, 18, BRG>(ledArray, numLeds); break;
-                case 3: addLEDStrip<WS2812B, 18, BGR>(ledArray, numLeds); break;
-                case 4: addLEDStrip<WS2812B, 18, RBG>(ledArray, numLeds); break;
-                case 5: addLEDStrip<WS2812B, 18, GBR>(ledArray, numLeds); break;
-                default: addLEDStrip<WS2812B, 18, GRB>(ledArray, numLeds); break;
-            }
+            addLEDStrip<WS2812B, 18, GRB>(ledArray, numLeds);
             break;
-        case 19:
-            switch (colorOrder) {
-                case 0: addLEDStrip<WS2812B, 19, GRB>(ledArray, numLeds); break;
-                case 1: addLEDStrip<WS2812B, 19, RGB>(ledArray, numLeds); break;
-                case 2: addLEDStrip<WS2812B, 19, BRG>(ledArray, numLeds); break;
-                case 3: addLEDStrip<WS2812B, 19, BGR>(ledArray, numLeds); break;
-                case 4: addLEDStrip<WS2812B, 19, RBG>(ledArray, numLeds); break;
-                case 5: addLEDStrip<WS2812B, 19, GBR>(ledArray, numLeds); break;
-                default: addLEDStrip<WS2812B, 19, GRB>(ledArray, numLeds); break;
-            }
+        case 27:
+            addLEDStrip<WS2812B, 27, GRB>(ledArray, numLeds);
             break;
-        case 21:
-            switch (colorOrder) {
-                case 0: addLEDStrip<WS2812B, 21, GRB>(ledArray, numLeds); break;
-                case 1: addLEDStrip<WS2812B, 21, RGB>(ledArray, numLeds); break;
-                case 2: addLEDStrip<WS2812B, 21, BRG>(ledArray, numLeds); break;
-                case 3: addLEDStrip<WS2812B, 21, BGR>(ledArray, numLeds); break;
-                case 4: addLEDStrip<WS2812B, 21, RBG>(ledArray, numLeds); break;
-                case 5: addLEDStrip<WS2812B, 21, GBR>(ledArray, numLeds); break;
-                default: addLEDStrip<WS2812B, 21, GRB>(ledArray, numLeds); break;
-            }
+#ifndef TARGET_ESP32_C6
+        // These pins don't exist on ESP32-C6, only compile for ESP32 classic
+        case 32:
+            addLEDStrip<WS2812B, 32, GRB>(ledArray, numLeds);
             break;
-        case 22:
-            switch (colorOrder) {
-                case 0: addLEDStrip<WS2812B, 22, GRB>(ledArray, numLeds); break;
-                case 1: addLEDStrip<WS2812B, 22, RGB>(ledArray, numLeds); break;
-                case 2: addLEDStrip<WS2812B, 22, BRG>(ledArray, numLeds); break;
-                case 3: addLEDStrip<WS2812B, 22, BGR>(ledArray, numLeds); break;
-                case 4: addLEDStrip<WS2812B, 22, RBG>(ledArray, numLeds); break;
-                case 5: addLEDStrip<WS2812B, 22, GBR>(ledArray, numLeds); break;
-                default: addLEDStrip<WS2812B, 22, GRB>(ledArray, numLeds); break;
-            }
+        case 33:
+            addLEDStrip<WS2812B, 33, GRB>(ledArray, numLeds);
             break;
+#endif
         default:
-            Serial.printf("[BMDevice] Warning: Pin %d not supported. Using pin 2 as fallback.\n", pin);
-            addLEDStrip<WS2812B, 2, GRB>(ledArray, numLeds);
+            Serial.printf("[BMDevice] Error: Pin %d not supported. Only pins 5,12,13,14,16,17,18,27", pin);
+#ifndef TARGET_ESP32_C6
+            Serial.print(",32,33");
+#endif
+            Serial.println(" are supported for LEDs.");
             break;
     }
 }
@@ -905,4 +908,223 @@ void BMDevice::initializeLEDStrips() {
         Serial.printf("[BMDevice] LED Strip %d: Pin %d, %d LEDs, Color Order %d\n", 
                      i, pin, numLeds, colorOrder);
     }
+}
+
+// Chunked Status Update Implementation
+void BMDevice::registerStatusChunk(const String& type, std::function<void()> sendFunction, const String& description) {
+    StatusChunk chunk;
+    chunk.type = type;
+    chunk.sendFunction = sendFunction;
+    chunk.description = description;
+    statusChunks_.push_back(chunk);
+    
+    Serial.print("[BMDevice] Registered status chunk: ");
+    Serial.print(type);
+    if (description.length() > 0) {
+        Serial.print(" - ");
+        Serial.print(description);
+    }
+    Serial.println();
+}
+
+void BMDevice::startChunkedStatusUpdate() {
+    if (statusChunks_.size() == 0) {
+        // Fallback to legacy status update if no chunks registered
+        sendStatusUpdate();
+        return;
+    }
+    
+    statusUpdateState_ = STATUS_SENDING_CHUNKS;
+    currentChunkIndex_ = 0;
+    statusUpdateTimer_ = millis();
+    
+    Serial.printf("[BMDevice] Starting chunked status update (%d chunks)\n", statusChunks_.size());
+}
+
+void BMDevice::clearStatusChunks() {
+    statusChunks_.clear();
+    statusUpdateState_ = STATUS_IDLE;
+    Serial.println("[BMDevice] Cleared all status chunks");
+}
+
+void BMDevice::handleChunkedStatusUpdate() {
+    if (statusUpdateState_ != STATUS_SENDING_CHUNKS) {
+        return;
+    }
+    
+    unsigned long currentTime = millis();
+    
+    // Check if it's time to send the next chunk
+    if (currentTime - statusUpdateTimer_ >= STATUS_UPDATE_DELAY) {
+        if (currentChunkIndex_ < statusChunks_.size()) {
+            // Send current chunk
+            StatusChunk& chunk = statusChunks_[currentChunkIndex_];
+            Serial.printf("[BMDevice] Sending chunk %d/%d: %s\n", 
+                         currentChunkIndex_ + 1, statusChunks_.size(), chunk.type.c_str());
+            
+            chunk.sendFunction();
+            
+            // Move to next chunk
+            currentChunkIndex_++;
+            statusUpdateTimer_ = currentTime;
+        } else {
+            // All chunks sent
+            statusUpdateState_ = STATUS_IDLE;
+            Serial.println("[BMDevice] Chunked status update complete");
+        }
+    }
+}
+
+void BMDevice::sendBasicStatusChunk() {
+    // Get current defaults for additional status info
+    DeviceDefaults defaults = defaults_.getCurrentDefaults();
+    
+    // Start with the basic device state JSON
+    StaticJsonDocument<512> doc;
+    
+    // Mark this as basic status chunk
+    doc["type"] = "basicStatus";
+    
+    // Basic device state (same as original sendStatusUpdate)
+    doc["pwr"] = deviceState_.power;
+    doc["bri"] = deviceState_.brightness;
+    doc["spd"] = deviceState_.speed;
+    doc["dir"] = deviceState_.reverseStrip;
+    
+    const char* effectName = LightShow::effectIdToName(deviceState_.currentEffect);
+    doc["fx"] = effectName;
+    doc["pal"] = LightShow::paletteIdToName(deviceState_.currentPalette);
+    
+    // GPS/Position data
+    doc["posAvail"] = deviceState_.positionAvailable;
+    doc["spdCur"] = deviceState_.currentSpeed;
+    
+    if (deviceState_.positionAvailable) {
+        Position& currentPos = const_cast<Position&>(deviceState_.currentPosition);
+        JsonObject posObj = doc.createNestedObject("pos");
+        posObj["lat"] = currentPos.latitude();
+        posObj["lon"] = currentPos.longitude();
+    }
+    
+    // Basic defaults info
+    doc["maxBri"] = defaults.maxBrightness;
+    doc["owner"] = defaults.owner;
+    doc["deviceName"] = defaults.deviceName;
+    
+    String status;
+    serializeJson(doc, status);
+    Serial.printf("[BMDevice] Basic status chunk: %s\n", status.c_str());
+    bluetoothHandler_.sendStatusUpdate(status);
+}
+
+void BMDevice::sendDeviceConfigChunk() {
+    StaticJsonDocument<512> doc;
+    
+    // Mark this as device configuration chunk
+    doc["type"] = "devConfig";
+    
+    DeviceDefaults defaults = defaults_.getCurrentDefaults();
+    
+    // Device configuration - abbreviated keys
+    doc["devType"] = defaults.deviceType;
+    doc["auto"] = defaults.autoOn;
+    doc["gps"] = defaults.gpsEnabled;
+    doc["interval"] = defaults.statusUpdateInterval;
+    
+    // LED strip configuration - abbreviated
+    doc["strips"] = defaults.activeLEDStrips;
+    JsonArray stripsArray = doc.createNestedArray("leds");
+    
+    for (int i = 0; i < defaults.activeLEDStrips && i < MAX_LED_STRIPS; i++) {
+        if (!defaults.ledStrips[i].enabled) continue;
+        
+        JsonObject stripObj = stripsArray.createNestedObject();
+        stripObj["i"] = i;                                   // index
+        stripObj["p"] = defaults.ledStrips[i].pin;           // pin
+        stripObj["n"] = defaults.ledStrips[i].numLeds;       // numLeds
+        stripObj["o"] = defaults.ledStrips[i].colorOrder;    // colorOrder
+        stripObj["e"] = defaults.ledStrips[i].enabled;       // enabled
+    }
+    
+    String status;
+    serializeJson(doc, status);
+    Serial.printf("[BMDevice] Device config chunk: %s\n", status.c_str());
+    bluetoothHandler_.sendStatusUpdate(status);
+}
+
+void BMDevice::sendDefaultsChunk() {
+    StaticJsonDocument<512> doc;
+    
+    // Mark this as defaults chunk
+    doc["type"] = "defaults";
+    
+    DeviceDefaults defaults = defaults_.getCurrentDefaults();
+    
+    // All default settings - abbreviated keys
+    doc["dBri"] = defaults.brightness;
+    doc["dSpd"] = defaults.speed;
+    doc["dPal"] = LightShow::paletteIdToName(defaults.palette);
+    doc["dFx"] = LightShow::effectIdToName(defaults.effect);
+    doc["dDir"] = defaults.reverseDirection;
+    
+    // Effect color - abbreviated
+    JsonObject colorObj = doc.createNestedObject("dCol");
+    colorObj["r"] = defaults.effectColor.r;
+    colorObj["g"] = defaults.effectColor.g;
+    colorObj["b"] = defaults.effectColor.b;
+    
+    // Version info
+    doc["ver"] = defaults.version;
+    
+    String status;
+    serializeJson(doc, status);
+    Serial.printf("[BMDevice] Defaults chunk: %s\n", status.c_str());
+    bluetoothHandler_.sendStatusUpdate(status);
+}
+
+void BMDevice::sendEffectParametersChunk() {
+    StaticJsonDocument<512> doc;
+    
+    // Mark this as effect parameters chunk
+    doc["type"] = "effectParams";
+    
+    // All current effect parameters with abbreviated keys (BLE commands 0x0B-0x19)
+    doc["ww"] = deviceState_.waveWidth;           // 0x0B waveWidth
+    doc["mc"] = deviceState_.meteorCount;         // 0x0C meteorCount
+    doc["tl"] = deviceState_.trailLength;         // 0x0D trailLength
+    doc["hv"] = deviceState_.heatVariance;        // 0x0E heatVariance
+    doc["mir"] = deviceState_.mirrorCount;        // 0x0F mirrorCount
+    doc["cc"] = deviceState_.cometCount;          // 0x10 cometCount
+    doc["dr"] = deviceState_.dropRate;            // 0x11 dropRate
+    doc["cs"] = deviceState_.cloudScale;          // 0x12 cloudScale
+    doc["bc"] = deviceState_.blobCount;           // 0x13 blobCount
+    doc["wc"] = deviceState_.waveCount;           // 0x14 waveCount
+    doc["fi"] = deviceState_.flashIntensity;      // 0x15 flashIntensity
+    doc["ff"] = deviceState_.flashFrequency;      // 0x16 flashFrequency
+    doc["es"] = deviceState_.explosionSize;       // 0x17 explosionSize
+    doc["sa"] = deviceState_.spiralArms;          // 0x18 spiralArms
+    
+    // Effect color (0x19) - abbreviated
+    JsonObject effectColorObj = doc.createNestedObject("col");
+    effectColorObj["r"] = deviceState_.effectColor.r;
+    effectColorObj["g"] = deviceState_.effectColor.g;
+    effectColorObj["b"] = deviceState_.effectColor.b;
+    
+    String status;
+    serializeJson(doc, status);
+    Serial.printf("[BMDevice] Effect parameters chunk: %s\n", status.c_str());
+    bluetoothHandler_.sendStatusUpdate(status);
+}
+
+void BMDevice::initializeDefaultStatusChunks() {
+    // Clear any existing chunks
+    clearStatusChunks();
+    
+    // Register default chunks that all BMDevice instances will send (using abbreviated types)
+    registerStatusChunk("basicStatus", [this]() { sendBasicStatusChunk(); }, "Core device state and settings");
+    registerStatusChunk("devConfig", [this]() { sendDeviceConfigChunk(); }, "Device configuration and LED setup");
+    registerStatusChunk("effectParams", [this]() { sendEffectParametersChunk(); }, "Effect parameters controlled via BLE commands 0x0B-0x19");
+    registerStatusChunk("defaults", [this]() { sendDefaultsChunk(); }, "Persistent default settings");
+    
+    Serial.printf("[BMDevice] Initialized %d default status chunks\n", statusChunks_.size());
 } 
