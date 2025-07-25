@@ -19,6 +19,21 @@ enum StoplightMode {
   MODE_EUROPEAN = 1     // Red -> Red+Yellow -> Green -> Yellow -> Red
 };
 
+// Stoplight BLE Feature Commands (0x50-0x5F range to avoid BMDevice conflicts)
+#define STOPLIGHT_FEATURE_AUTO_CYCLE 0x50           // On/Off Auto Cycle
+#define STOPLIGHT_FEATURE_MANUAL_RED 0x51           // Manual Red Light
+#define STOPLIGHT_FEATURE_MANUAL_YELLOW 0x52        // Manual Yellow Light
+#define STOPLIGHT_FEATURE_MANUAL_GREEN 0x53         // Manual Green Light
+#define STOPLIGHT_FEATURE_MANUAL_RED_YELLOW 0x54    // Manual Red+Yellow (European)
+#define STOPLIGHT_FEATURE_ALL_OFF 0x55              // All Off
+#define STOPLIGHT_FEATURE_RED_DURATION 0x56         // Red Duration
+#define STOPLIGHT_FEATURE_YELLOW_DURATION 0x57      // Yellow Duration
+#define STOPLIGHT_FEATURE_GREEN_DURATION 0x58       // Green Duration
+#define STOPLIGHT_FEATURE_RED_YELLOW_DURATION 0x59  // Red+Yellow Duration (European)
+#define STOPLIGHT_FEATURE_MODE 0x5A                 // Stoplight Mode (American/European)
+#define STOPLIGHT_FEATURE_SAVE_SETTINGS 0x5E        // Save Settings
+#define STOPLIGHT_FEATURE_RESTORE_DEFAULTS 0x5F     // Restore Defaults
+
 // Forward declarations
 void updateStoplightState();
 void changeToState(StoplightState newState);
@@ -108,7 +123,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     // Handle features
     switch (feature)
     {
-    case 0x01: // On/Off Auto Cycle
+    case STOPLIGHT_FEATURE_AUTO_CYCLE: // On/Off Auto Cycle
       if (dataLength >= 2)
       {
         Serial.print("Auto cycle command - value[1]: ");
@@ -131,42 +146,42 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       }
       break;
 
-    case 0x02: // Manual Red Light
+    case STOPLIGHT_FEATURE_MANUAL_RED: // Manual Red Light
       Serial.println("Manual Red Light");
       stoplightActive = false;
       autoCycle = false;
       changeToState(STATE_RED);
       break;
 
-    case 0x03: // Manual Yellow Light
+    case STOPLIGHT_FEATURE_MANUAL_YELLOW: // Manual Yellow Light
       Serial.println("Manual Yellow Light");
       stoplightActive = false;
       autoCycle = false;
       changeToState(STATE_YELLOW);
       break;
 
-    case 0x04: // Manual Green Light
+    case STOPLIGHT_FEATURE_MANUAL_GREEN: // Manual Green Light
       Serial.println("Manual Green Light");
       stoplightActive = false;
       autoCycle = false;
       changeToState(STATE_GREEN);
       break;
 
-    case 0x05: // Manual Red+Yellow (European)
+    case STOPLIGHT_FEATURE_MANUAL_RED_YELLOW: // Manual Red+Yellow (European)
       Serial.println("Manual Red+Yellow Light");
       stoplightActive = false;
       autoCycle = false;
       changeToState(STATE_RED_YELLOW);
       break;
 
-    case 0x06: // All Off
+    case STOPLIGHT_FEATURE_ALL_OFF: // All Off
       Serial.println("All Lights Off");
       stoplightActive = false;
       autoCycle = false;
       changeToState(STATE_OFF);
       break;
 
-    case 0x07: // Red Duration
+    case STOPLIGHT_FEATURE_RED_DURATION: // Red Duration
     {
       int duration = 0;
       memcpy(&duration, value.data() + 1, sizeof(int));
@@ -176,7 +191,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x08: // Yellow Duration
+    case STOPLIGHT_FEATURE_YELLOW_DURATION: // Yellow Duration
     {
       int duration = 0;
       memcpy(&duration, value.data() + 1, sizeof(int));
@@ -186,7 +201,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x09: // Green Duration
+    case STOPLIGHT_FEATURE_GREEN_DURATION: // Green Duration
     {
       int duration = 0;
       memcpy(&duration, value.data() + 1, sizeof(int));
@@ -196,7 +211,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0A: // Red+Yellow Duration (European)
+    case STOPLIGHT_FEATURE_RED_YELLOW_DURATION: // Red+Yellow Duration (European)
     {
       int duration = 0;
       memcpy(&duration, value.data() + 1, sizeof(int));
@@ -206,7 +221,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0B: // Stoplight Mode (American/European)
+    case STOPLIGHT_FEATURE_MODE: // Stoplight Mode (American/European)
     {
       int mode = 0;
       memcpy(&mode, value.data() + 1, sizeof(int));
@@ -216,12 +231,12 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0F: // Save Settings
+    case STOPLIGHT_FEATURE_SAVE_SETTINGS: // Save Settings
       Serial.println("Save Settings Command");
       saveSettings();
       break;
 
-    case 0x10: // Restore Defaults
+    case STOPLIGHT_FEATURE_RESTORE_DEFAULTS: // Restore Defaults
     {
       Serial.println("Restore Defaults Command");
       restoreDefaults();

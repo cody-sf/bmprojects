@@ -3,8 +3,8 @@
 // 17, 16 for Vinny/Ashton
 // 16, 17 for everyone eles
 
-#define GPS_RX_PIN 17  // Replace with the correct RX pin
-#define GPS_TX_PIN 16  // Replace with the correct TX pin
+#define GPS_RX_PIN 21  // Replace with the correct RX pin
+#define GPS_TX_PIN 22  // Replace with the correct TX pin
 
 HardwareSerial gpsSerial(2);  // Use UART2 for the GPS
 

@@ -14,6 +14,7 @@ void sendStatusUpdate();
 void sendConfigStatusUpdate();
 void syncBluetoothStatus();
 void syncBluetoothSettings();
+void syncQuickStatus();
 void saveSettings();
 void loadSettings();
 void restoreDefaults();
@@ -37,6 +38,7 @@ bool deviceConnected = false;
 bool oldDeviceConnected = false;
 unsigned long lastStatusSync = 0;
 unsigned long lastConfigSync = 0;
+unsigned long lastQuickStatusSync = 0;
 
 // Variables
 // Factory Defaults
@@ -162,7 +164,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       digitalWrite(SOLENOID_PIN, LOW);
       break;
 
-    case 0x04: // Short Boof Duration
+    case 0x35: // Short Boof Duration
     {
       int d = 0;
       memcpy(&d, value.data() + 1, sizeof(int));
@@ -172,7 +174,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x05: // Long Boof Duration
+    case 0x36: // Long Boof Duration
     {
       int l = 0;
       memcpy(&l, value.data() + 1, sizeof(int));
@@ -182,7 +184,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x07: // stage1Start
+    case 0x37: // stage1Start
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -192,7 +194,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x08: // stage1End
+    case 0x42: // stage1End
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -203,7 +205,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x09: // stage1Interval
+    case 0x38: // stage1Interval
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -213,7 +215,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0A: // stage2End
+    case 0x39: // stage2End
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -224,7 +226,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0B: // stage2Interval
+    case 0x3A: // stage2Interval
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -234,7 +236,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0C: // stage3End
+    case 0x3B: // stage3End
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -244,7 +246,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0D: // stage3Interval
+    case 0x3C: // stage3Interval
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -254,7 +256,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0E: // stageDelay
+    case 0x3D: // stageDelay
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -264,19 +266,19 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0F: // Save Settings
+    case 0x1C: // Save Settings
       Serial.println("Save Settings Command");
       saveSettings();
       break;
 
-    case 0x10: // Restore Defaults
+    case 0x34: // Restore Defaults
     {
       Serial.println("Restore Defaults Command");
       restoreDefaults();
     }
     break;
 
-    case 0x11: // handle release
+    case 0x3E: // handle release
     {
       if (dataLength >= 5)
       { // Need at least 1 byte for command + 4 bytes for int
@@ -300,7 +302,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       break;
     }
 
-    case 0x12: // Open Valve
+    case 0x3F: // Open Valve
     {
       Serial.println("Opening valve");
       digitalWrite(SOLENOID_PIN, HIGH);
@@ -312,7 +314,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       break;
     }
 
-    case 0x13: // Close Valve
+    case 0x40: // Close Valve
     {
       Serial.println("Closing valve");
       digitalWrite(SOLENOID_PIN, LOW);
@@ -321,7 +323,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       break;
     }
 
-    case 0x14: // Set Valve Timeout
+    case 0x41: // Set Valve Timeout
     {
       int timeout = 0;
       memcpy(&timeout, value.data() + 1, sizeof(int));
@@ -329,6 +331,11 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       Serial.print("Valve timeout set to: ");
       Serial.print(valveTimeout);
       Serial.println(" ms");
+      break;
+    }
+    case 0x30: // set_owner
+    {
+      Serial.println("Setting owner");
       break;
     }
 
@@ -398,6 +405,7 @@ void loop()
     // Reset warmup state when turned off
     warmupState = WARMUP_IDLE;
   }
+  syncQuickStatus();
   syncBluetoothStatus();
   syncBluetoothSettings();
 }
@@ -418,7 +426,7 @@ void handlePressureSensor()
   int sensorValue = analogRead(PRESSURE_PIN);
   currentVoltage = (sensorValue / float(adcResolution)) * 3.3;
   pressure = ((currentVoltage - VoutMin) / (VoutMax - VoutMin)) * pressureMax;
-  pressure = max(0.0f, pressure);
+  pressure = max(0.0f, pressure); 
 }
 
 // BLE helpers
@@ -442,7 +450,7 @@ void sendStatusUpdate()
 {
   StaticJsonDocument<512> doc;
   // Add all the settings and their values
-  doc["power"] = ignitionPower;
+  doc["ignPwr"] = ignitionPower;
   doc["pLev"] = currentIgnitionPower;
   doc["ready"] = booferReady;
   doc["vol"] = currentVoltage;
@@ -485,9 +493,23 @@ void sendConfigStatusUpdate()
   statusCharacteristic.setValue(output.c_str());
 }
 
+void sendQuickStatusUpdate()
+{
+  StaticJsonDocument<128> doc;
+  doc["ignPwr"] = ignitionPower;
+  doc["pLev"] = currentIgnitionPower;
+  doc["ready"] = booferReady;
+  doc["pres"] = pressure;
+  doc["valveOpen"] = valveOpen;
+  String output;
+  serializeJson(doc, output);
+  Serial.print("Sending quick status: ");
+  Serial.println(output.c_str());
+  statusCharacteristic.setValue(output.c_str());
+}
 void syncBluetoothStatus()
 {
-  if ((millis() - lastStatusSync) > 500 && deviceConnected)
+  if ((millis() - lastStatusSync) > 10000 && deviceConnected)
   {
     sendStatusUpdate();
     lastStatusSync = millis();
@@ -496,12 +518,22 @@ void syncBluetoothStatus()
 
 void syncBluetoothSettings()
 {
-  if ((millis() - lastConfigSync) > 5000 && deviceConnected)
+  if ((millis() - lastConfigSync) > 10000 && deviceConnected)
   {
     sendConfigStatusUpdate();
     lastConfigSync = millis();
   }
 }
+
+void syncQuickStatus()
+{
+  if ((millis() - lastQuickStatusSync) > 2000 && deviceConnected)
+  {
+    sendQuickStatusUpdate();
+    lastQuickStatusSync = millis();
+  }
+}
+
 
 // Preference Helpers
 void restoreDefaults()
