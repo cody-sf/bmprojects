@@ -2,7 +2,7 @@
 #include <BMDevice.h>
 
 // Pin definitions - 8 channels for battery monitoring
-const int VOLTAGE_PINS[] = {32, 33, 34, 35, 36, 39, 25, 26};
+const int VOLTAGE_PINS[] = {32, 33, 34, 35, 27, 14, 25, 26};
 const int NUM_VOLTAGE_PINS = sizeof(VOLTAGE_PINS) / sizeof(VOLTAGE_PINS[0]);
 
 // Bluetooth device configuration
@@ -46,6 +46,7 @@ float latestRawValue[NUM_VOLTAGE_PINS];
 float latestNoiseLevel[NUM_VOLTAGE_PINS];
 String latestStatus[NUM_VOLTAGE_PINS];
 unsigned long lastVoltageUpdate = 0;
+bool hasCharged[NUM_VOLTAGE_PINS];
 
 // Non-blocking timing configuration
 const unsigned long VOLTAGE_READ_INTERVAL = 1000;  // Read voltages every 1000ms
