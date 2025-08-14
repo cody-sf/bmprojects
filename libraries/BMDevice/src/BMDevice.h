@@ -49,7 +49,7 @@ public:
     }
     
     // GPS Integration (optional)
-    void enableGPS(int rxPin = 16, int txPin = 17, int baud = DEFAULT_GPS_BAUD);
+    void enableGPS(int rxPin = 21, int txPin = 22, int baud = DEFAULT_GPS_BAUD);
     void setLocationService(LocationService* locationService);
     
     // Device lifecycle
@@ -96,9 +96,7 @@ private:
     
     // GPS components (optional)
     bool gpsEnabled_;
-    bool ownGPSSerial_;
-    TinyGPSPlus* gps_;
-    HardwareSerial* gpsSerial_;
+    bool ownGPSSerial_; // True if we created the LocationService
     LocationService* locationService_;
     
     // Timing

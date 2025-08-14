@@ -2,9 +2,8 @@
 
 BMDevice::BMDevice(const char* deviceName, const char* serviceUUID, const char* featuresUUID, const char* statusUUID)
     : bluetoothHandler_(deviceName, serviceUUID, featuresUUID, statusUUID), lightShow_(std::vector<CLEDController*>(), deviceClock_),
-      gpsEnabled_(false), ownGPSSerial_(false), gps_(nullptr), gpsSerial_(nullptr), 
-      locationService_(nullptr), lastBluetoothSync_(0), statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL),
-      statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0) {
+      gpsEnabled_(false), ownGPSSerial_(false), locationService_(nullptr), lastBluetoothSync_(0), 
+      statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL), statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0) {
     
     // Set up callbacks
     bluetoothHandler_.setFeatureCallback([this](uint8_t feature, const uint8_t* data, size_t length) {
@@ -18,9 +17,8 @@ BMDevice::BMDevice(const char* deviceName, const char* serviceUUID, const char* 
 
 BMDevice::BMDevice(const char* serviceUUID, const char* featuresUUID, const char* statusUUID)
     : bluetoothHandler_("", serviceUUID, featuresUUID, statusUUID), lightShow_(std::vector<CLEDController*>(), deviceClock_),
-      gpsEnabled_(false), ownGPSSerial_(false), gps_(nullptr), gpsSerial_(nullptr), 
-      locationService_(nullptr), lastBluetoothSync_(0), statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL),
-      dynamicNaming_(true), statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0) {
+      gpsEnabled_(false), ownGPSSerial_(false), locationService_(nullptr), lastBluetoothSync_(0), 
+      statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL), dynamicNaming_(true), statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0) {
     
     // Initialize LED arrays
     for (int i = 0; i < MAX_LED_STRIPS; i++) {
@@ -38,11 +36,8 @@ BMDevice::BMDevice(const char* serviceUUID, const char* featuresUUID, const char
 }
 
 BMDevice::~BMDevice() {
-    if (ownGPSSerial_ && gpsSerial_) {
-        delete gpsSerial_;
-    }
-    if (gps_) {
-        delete gps_;
+    if (ownGPSSerial_ && locationService_) {
+        delete locationService_;
     }
     
     // Clean up LED arrays
@@ -55,26 +50,39 @@ BMDevice::~BMDevice() {
 }
 
 void BMDevice::enableGPS(int rxPin, int txPin, int baud) {
+    Serial.printf("[BMDevice] enableGPS() called with pins RX:%d TX:%d @ %d baud\n", rxPin, txPin, baud);
+    
+    // Create and configure LocationService
+    if (!locationService_) {
+        Serial.println("[BMDevice] Creating new LocationService");
+        locationService_ = new LocationService();
+        ownGPSSerial_ = true; // We created the LocationService
+    } else {
+        Serial.println("[BMDevice] Using existing LocationService");
+    }
+    
     gpsEnabled_ = true;
-    ownGPSSerial_ = true;
+    Serial.println("[BMDevice] Calling locationService_->start_tracking_position()");
+    locationService_->start_tracking_position();
     
-    gps_ = new TinyGPSPlus();
-    gpsSerial_ = new HardwareSerial(2);
-    gpsSerial_->begin(baud, SERIAL_8N1, rxPin, txPin);
+    // Also update the defaults to reflect GPS is enabled
+    defaults_.setGPSEnabled(true);
     
-    Serial.print("[BMDevice] GPS enabled on pins RX:");
-    Serial.print(rxPin);
-    Serial.print(" TX:");
-    Serial.print(txPin);
-    Serial.print(" @ ");
-    Serial.print(baud);
-    Serial.println(" baud");
+    Serial.printf("[BMDevice] GPS enabled using LocationService (pins RX:%d TX:%d @ %d baud)\n", 
+                 rxPin, txPin, baud);
+    Serial.println("[BMDevice] GPS will auto-update position and speed");
 }
 
 void BMDevice::setLocationService(LocationService* locationService) {
     locationService_ = locationService;
     gpsEnabled_ = true;
     ownGPSSerial_ = false;
+    
+    // Ensure GPS tracking is started
+    locationService_->start_tracking_position();
+    
+    // Also update the defaults to reflect GPS is enabled
+    defaults_.setGPSEnabled(true);
     
     Serial.println("[BMDevice] Using external LocationService for GPS");
 }
@@ -137,12 +145,12 @@ bool BMDevice::begin() {
 }
 
 void BMDevice::loop() {
-    bluetoothHandler_.poll();
-    
-    // Update GPS if enabled
+    // Update GPS first and more frequently to prevent data loss
     if (gpsEnabled_) {
         updateGPS();
     }
+    
+    bluetoothHandler_.poll();
     
     // Handle chunked status updates
     handleChunkedStatusUpdate();
@@ -294,27 +302,58 @@ void BMDevice::handleConnectionChange(bool connected) {
 }
 
 void BMDevice::updateGPS() {
+    static unsigned long lastGPSDebug = 0;
+    static bool lastPositionState = false;
+    
     if (locationService_) {
-        // Use external LocationService
+        // Use LocationService - it handles all GPS complexity
         locationService_->update_position();
+        
+        // Update device state from LocationService
         if (locationService_->is_current_position_available()) {
             deviceState_.currentPosition = locationService_->current_position();
             deviceState_.positionAvailable = true;
             deviceState_.currentSpeed = locationService_->current_speed();
-        }
-    } else if (gpsSerial_ && gps_) {
-        // Use internal GPS
-        while (gpsSerial_->available() > 0) {
-            if (gps_->encode(gpsSerial_->read())) {
-                if (gps_->location.isValid()) {
-                    deviceState_.currentPosition = Position(gps_->location.lat(), gps_->location.lng());
-                    deviceState_.positionAvailable = true;
-                    
-                    if (gps_->speed.isValid()) {
-                        deviceState_.currentSpeed = gps_->speed.mph();
-                    }
-                }
+            
+            // Log position changes
+            if (!lastPositionState) {
+                Position pos = deviceState_.currentPosition;
+                Serial.printf("[BMDevice] GPS fix acquired: %.6f, %.6f (speed: %.2f km/h)\n", 
+                            pos.latitude(), pos.longitude(), deviceState_.currentSpeed);
+                lastPositionState = true;
             }
+        } else {
+            deviceState_.positionAvailable = false;
+            if (lastPositionState) {
+                Serial.println("[BMDevice] GPS fix lost");
+                lastPositionState = false;
+            }
+        }
+        
+        // Debug output every 10 seconds
+        if (millis() - lastGPSDebug > 10000) {
+            Serial.printf("[BMDevice] GPS Status - Fix: %s, Speed: %.2f km/h\n",
+                         deviceState_.positionAvailable ? "YES" : "NO",
+                         deviceState_.currentSpeed);
+            
+            // Check LocationService directly
+            bool locAvail = locationService_->is_current_position_available();
+            bool initialAvail = locationService_->is_initial_position_available();
+            Serial.printf("[BMDevice] LocationService - Current: %s, Initial: %s\n",
+                         locAvail ? "YES" : "NO", initialAvail ? "YES" : "NO");
+            
+            if (locAvail) {
+                Position pos = locationService_->current_position();
+                float speed = locationService_->current_speed();
+                Serial.printf("[BMDevice] LocationService pos: %.6f, %.6f, speed: %.2f\n",
+                             pos.latitude(), pos.longitude(), speed);
+            }
+            
+            if (!deviceState_.positionAvailable) {
+                Serial.println("[BMDevice] No GPS fix yet - move device outdoors with clear sky view");
+            }
+            
+            lastGPSDebug = millis();
         }
     }
 }
@@ -391,6 +430,7 @@ void BMDevice::sendStatusUpdate() {
     doc["pal"] = LightShow::paletteIdToName(deviceState_.currentPalette);
     
     // GPS/Position data
+    doc["gps"] = gpsEnabled_;
     doc["posAvail"] = deviceState_.positionAvailable;
     doc["spdCur"] = deviceState_.currentSpeed;
     
@@ -995,7 +1035,8 @@ void BMDevice::sendBasicStatusChunk() {
     doc["fx"] = effectName;
     doc["pal"] = LightShow::paletteIdToName(deviceState_.currentPalette);
     
-    // GPS/Position data
+    // GPS/Position data (abbreviated for size)
+    doc["gps"] = gpsEnabled_;
     doc["posAvail"] = deviceState_.positionAvailable;
     doc["spdCur"] = deviceState_.currentSpeed;
     
@@ -1006,10 +1047,8 @@ void BMDevice::sendBasicStatusChunk() {
         posObj["lon"] = currentPos.longitude();
     }
     
-    // Basic defaults info
+    // Essential info only (move others to device config chunk)
     doc["maxBri"] = defaults.maxBrightness;
-    doc["owner"] = defaults.owner;
-    doc["deviceName"] = defaults.deviceName;
     
     String status;
     serializeJson(doc, status);
@@ -1030,6 +1069,8 @@ void BMDevice::sendDeviceConfigChunk() {
     doc["auto"] = defaults.autoOn;
     doc["gps"] = defaults.gpsEnabled;
     doc["interval"] = defaults.statusUpdateInterval;
+    doc["owner"] = defaults.owner;
+    doc["deviceName"] = defaults.deviceName;
     
     // LED strip configuration - abbreviated
     doc["strips"] = defaults.activeLEDStrips;

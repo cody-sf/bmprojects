@@ -14,7 +14,43 @@ bool dataReceived = false;
 
 void setup() {
   Serial.begin(115200);
-  gpsSerial.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);  // Ensure baud rate matches your GPS module
+  
+  // Test different baud rates - expanded list
+  int baudRates[] = {9600, 4800, 38400, 19200, 57600, 115200, 14400, 28800, 76800, 230400};
+  int numRates = sizeof(baudRates) / sizeof(baudRates[0]);
+  
+  for (int i = 0; i < numRates; i++) {
+    Serial.printf("Testing GPS at %d baud...\n", baudRates[i]);
+    gpsSerial.begin(baudRates[i], SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+    delay(3000); // Longer delay for GPS data
+    
+    if (gpsSerial.available() > 0) {
+      String data = "";
+      int charCount = 0;
+      while (gpsSerial.available() > 0 && charCount < 200) {
+        char c = gpsSerial.read();
+        data += c;
+        charCount++;
+      }
+      
+      Serial.printf("Data at %d baud (%d chars): ", baudRates[i], charCount);
+      
+      // Check if data looks like valid NMEA
+      if (data.indexOf("$GP") >= 0 || data.indexOf("$GN") >= 0 || data.indexOf("$GL") >= 0) {
+        Serial.println("*** FOUND VALID NMEA! ***");
+        Serial.println(data);
+        Serial.printf("*** CORRECT BAUD RATE: %d ***\n", baudRates[i]);
+        break;
+      } else {
+        // Show first 50 chars to see what we're getting
+        String sample = data.substring(0, 50);
+        Serial.printf("Invalid: %s...\n", sample.c_str());
+      }
+    } else {
+      Serial.println("No data received");
+    }
+  }
+  
   Serial.println("GPS Hardware Test Started");
   Serial.println("Expecting data every second...");
 }
