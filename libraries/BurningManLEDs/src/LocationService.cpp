@@ -5,7 +5,9 @@ LocationService::LocationService() : initial_gps_sample_acquired_(false),
                                      latest_gps_sample_time_(0),
                                      current_speed_(0),
                                      speed_history_index_(0),
-                                     gpsSerial(2)
+                                     gpsSerial(2),
+                                     last_logged_speed_(0),
+                                     last_gps_log_time_(0)
 {
     for (size_t i = 0; i < SPEED_HISTORY_SIZE; i++)
     {
@@ -98,14 +100,28 @@ void LocationService::update_position()
                                 gps.time.hour(), gps.time.minute(), gps.time.second());
                 }
                 
-                Serial.printf("[LocationService] GPS fix: %.6f, %.6f, speed: %.2f km/h\n", 
-                             current_position_.latitude(), current_position_.longitude(), current_speed_);
+                // Only log GPS fixes when there are significant changes or every 30 seconds
+                unsigned long now = millis();
+                bool position_changed = (abs(current_position_.latitude() - last_logged_position_.latitude()) > 0.0001 ||
+                                       abs(current_position_.longitude() - last_logged_position_.longitude()) > 0.0001);
+                bool speed_changed = abs(current_speed_ - last_logged_speed_) > 1.0; // 1 km/h threshold
+                bool time_to_log = (now - last_gps_log_time_) > 30000; // Every 30 seconds
+                
+                if (position_changed || speed_changed || time_to_log || last_gps_log_time_ == 0) {
+                    Serial.printf("[LocationService] GPS fix: %.6f, %.6f, speed: %.2f km/h\n", 
+                                 current_position_.latitude(), current_position_.longitude(), current_speed_);
+                    
+                    // Update last logged values
+                    last_logged_position_ = current_position_;
+                    last_logged_speed_ = current_speed_;
+                    last_gps_log_time_ = now;
+                }
             }
         }
     }
     
-    // Enhanced debug output every 10 seconds
-    if (now - lastDebug > 10000) {
+    // Enhanced debug output every 60 seconds
+    if (now - lastDebug > 60000) {
         Serial.printf("[LocationService] Debug - Bytes read: %d, Total chars: %lu, Satellites: %d, Sentences: %lu, Failed: %lu\n",
                      bytesRead, totalChars, gps.satellites.value(), gps.sentencesWithFix(), gps.failedChecksum());
         
@@ -139,14 +155,19 @@ void LocationService::update_position()
         lastDebug = now;
     }
     
-    // Check satellite count more frequently (every 5 seconds)
-    if (now - lastSatelliteCheck > 5000) {
+    // Check satellite count less frequently (every 30 seconds) and only log significant changes
+    static int lastSatCount = -1;
+    if (now - lastSatelliteCheck > 30000) {
         if (gps.satellites.isValid()) {
             int satCount = gps.satellites.value();
-            if (satCount > 0) {
-                Serial.printf("[LocationService] Satellites in view: %d\n", satCount);
-            } else {
-                Serial.println("[LocationService] No satellites detected - check antenna and sky view");
+            // Only log if satellite count changed significantly or is 0
+            if (satCount != lastSatCount && (abs(satCount - lastSatCount) > 2 || satCount == 0 || lastSatCount == -1)) {
+                if (satCount > 0) {
+                    Serial.printf("[LocationService] Satellites in view: %d\n", satCount);
+                } else {
+                    Serial.println("[LocationService] No satellites detected - check antenna and sky view");
+                }
+                lastSatCount = satCount;
             }
         }
         lastSatelliteCheck = now;

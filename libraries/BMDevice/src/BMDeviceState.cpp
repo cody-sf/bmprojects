@@ -37,6 +37,15 @@ void BMDeviceState::initializeDefaults() {
     currentPosition = Position();
     positionAvailable = false;
     currentSpeed = 0;
+    
+    // GPS Speed control defaults
+    gpsLowSpeed = 5.0;   // 5 km/h
+    gpsTopSpeed = 25.0;  // 25 km/h  
+    gpsLightshowSpeedEnabled = false;
+    
+    // GPS Speedometer color defaults
+    gpsSlowColor = CRGB::Red;     // Red for slow speeds
+    gpsFastColor = CRGB::Blue;    // Blue for fast speeds
 }
 
 String BMDeviceState::toJSON() const {
@@ -75,6 +84,11 @@ String BMDeviceState::toJSON() const {
     // GPS/Position data
     doc["posAvail"] = positionAvailable;
     doc["spdCur"] = currentSpeed;
+    
+    // GPS Speed control settings
+    doc["gpsLowSpd"] = gpsLowSpeed;
+    doc["gpsTopSpd"] = gpsTopSpeed;
+    doc["gpsLightSpdEn"] = gpsLightshowSpeedEnabled;
     
     if (positionAvailable) {
         Position& currentPos = const_cast<Position&>(currentPosition);

@@ -44,6 +44,15 @@ public:
     bool positionAvailable;
     float currentSpeed;
     
+    // GPS Speed control settings
+    float gpsLowSpeed;
+    float gpsTopSpeed;
+    bool gpsLightshowSpeedEnabled;
+    
+    // GPS Speedometer colors
+    CRGB gpsSlowColor;
+    CRGB gpsFastColor;
+    
     // State management
     String toJSON() const;
     void applyStateUpdate(const String& json);

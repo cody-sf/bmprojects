@@ -37,6 +37,11 @@ private:
     size_t speed_history_index_;
     TinyGPSPlus gps;          // TinyGPS++ object for parsing GPS data
     HardwareSerial gpsSerial; // ESP32 hardware serial object for GPS communication
+    
+    // Logging throttling variables
+    Position last_logged_position_;
+    float last_logged_speed_;
+    unsigned long last_gps_log_time_;
 };
 
 #endif // LOCATIONSERVICE_H

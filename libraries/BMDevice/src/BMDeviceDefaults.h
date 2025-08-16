@@ -46,6 +46,9 @@ struct LEDStripConfig {
 #define PREF_LED_COUNT "ledCount"
 #define PREF_LED_PINS "ledPins"
 #define PREF_COLOR_ORDERS "colorOrders"
+#define PREF_GPS_LOW_SPEED "gpsLowSpeed"
+#define PREF_GPS_TOP_SPEED "gpsTopSpeed"
+#define PREF_GPS_LIGHTSHOW_SPEED_ENABLED "gpsLightshowSpeedEnabled"
 
 struct DeviceDefaults {
     // Core settings
@@ -70,6 +73,11 @@ struct DeviceDefaults {
     unsigned long statusUpdateInterval;
     CRGB effectColor;
     bool gpsEnabled;
+    
+    // GPS Speed settings
+    float gpsLowSpeed;  // km/h - speed for maximum lightshow delay
+    float gpsTopSpeed;  // km/h - speed for minimum lightshow delay
+    bool gpsLightshowSpeedEnabled;
     
     // Version for migration
     int version;
@@ -100,6 +108,12 @@ struct DeviceDefaults {
         statusUpdateInterval = 5000;
         effectColor = CRGB::Green;
         gpsEnabled = false;
+        
+        // GPS Speed defaults
+        gpsLowSpeed = 5.0;   // 5 km/h - walking speed for max delay
+        gpsTopSpeed = 25.0;  // 25 km/h - biking speed for min delay
+        gpsLightshowSpeedEnabled = false;
+        
         version = DEFAULTS_VERSION;
     }
 };
@@ -138,6 +152,14 @@ public:
     bool setStatusInterval(unsigned long interval);
     bool setEffectColor(CRGB color);
     bool setGPSEnabled(bool enabled);
+    
+    // GPS Speed configuration
+    bool setGPSLowSpeed(float speed);
+    bool setGPSTopSpeed(float speed);
+    bool setGPSLightshowSpeedEnabled(bool enabled);
+    float getGPSLowSpeed();
+    float getGPSTopSpeed();
+    bool isGPSLightshowSpeedEnabled();
     
     // Get current defaults
     DeviceDefaults getCurrentDefaults();

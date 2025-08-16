@@ -221,6 +221,9 @@ void BMDevice::handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size
         case BLE_FEATURE_PALETTE:
             handlePaletteFeature(buffer, length);
             break;
+        case BLE_FEATURE_SPEEDOMETER:
+            handleSpeedometerFeature(buffer, length);
+            break;
         case BLE_FEATURE_EFFECT:
             handleEffectFeature(buffer, length);
             break;
@@ -265,6 +268,17 @@ void BMDevice::handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size
             break;
         case BLE_FEATURE_SET_AUTO_ON:
             handleSetAutoOnFeature(buffer, length);
+            break;
+        
+        // GPS Speed configuration commands
+        case BLE_FEATURE_SET_GPS_LOW_SPEED:
+            handleSetGPSLowSpeedFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_GPS_TOP_SPEED:
+            handleSetGPSTopSpeedFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_GPS_LIGHTSHOW_SPEED_ENABLED:
+            handleSetGPSLightshowSpeedEnabledFeature(buffer, length);
             break;
         
         // Generic device configuration commands
@@ -330,8 +344,8 @@ void BMDevice::updateGPS() {
             }
         }
         
-        // Debug output every 10 seconds
-        if (millis() - lastGPSDebug > 10000) {
+        // Debug output every 60 seconds
+        if (millis() - lastGPSDebug > 60000) {
             Serial.printf("[BMDevice] GPS Status - Fix: %s, Speed: %.2f km/h\n",
                          deviceState_.positionAvailable ? "YES" : "NO",
                          deviceState_.currentSpeed);
@@ -358,50 +372,125 @@ void BMDevice::updateGPS() {
     }
 }
 
+uint16_t BMDevice::calculateEffectiveSpeed() {
+    // If GPS lightshow speed is disabled or GPS not available, use normal speed
+    if (!deviceState_.gpsLightshowSpeedEnabled || !gpsEnabled_ || !deviceState_.positionAvailable) {
+        return deviceState_.speed;
+    }
+    
+    // Get current GPS speed
+    float currentGPSSpeed = deviceState_.currentSpeed;
+    
+    // Constrain GPS speed to our defined range
+    currentGPSSpeed = constrain(currentGPSSpeed, deviceState_.gpsLowSpeed, deviceState_.gpsTopSpeed);
+    
+    // Map GPS speed to lightshow speed (inverse relationship)
+    // Low GPS speed = high lightshow delay (slow lightshow)
+    // High GPS speed = low lightshow delay (fast lightshow)
+    
+    // Define lightshow speed range (delays in ms)
+    const uint16_t MIN_LIGHTSHOW_SPEED = 20;   // Fastest lightshow (20ms delay)
+    const uint16_t MAX_LIGHTSHOW_SPEED = 200;  // Slowest lightshow (200ms delay)
+    
+    // Calculate the normalized GPS speed (0.0 to 1.0)
+    float gpsSpeedRange = deviceState_.gpsTopSpeed - deviceState_.gpsLowSpeed;
+    float normalizedGPSSpeed = (currentGPSSpeed - deviceState_.gpsLowSpeed) / gpsSpeedRange;
+    
+    // Invert for lightshow speed (higher GPS speed = lower delay)
+    float invertedSpeed = 1.0f - normalizedGPSSpeed;
+    
+    // Map to lightshow speed range
+    uint16_t effectiveSpeed = MIN_LIGHTSHOW_SPEED + (uint16_t)(invertedSpeed * (MAX_LIGHTSHOW_SPEED - MIN_LIGHTSHOW_SPEED));
+    
+    // Debug output
+    static unsigned long lastDebugTime = 0;
+    if (millis() - lastDebugTime > 5000) { // Debug every 5 seconds
+        Serial.printf("[BMDevice] GPS Speed Mapping: GPS=%.1f km/h, Lightshow Speed=%d ms\n", 
+                     currentGPSSpeed, effectiveSpeed);
+        lastDebugTime = millis();
+    }
+    
+    return effectiveSpeed;
+}
+
 void BMDevice::updateLightShow() {
+    // Calculate effective speed (may be GPS-adjusted)
+    uint16_t effectiveSpeed = calculateEffectiveSpeed();
+    
     // Map LightSceneID to LightShow effect
     switch (deviceState_.currentEffect) {
         case LightSceneID::palette_stream:
-            lightShow_.palette_stream(deviceState_.speed, deviceState_.currentPalette, deviceState_.reverseStrip);
+            lightShow_.palette_stream(effectiveSpeed, deviceState_.currentPalette, deviceState_.reverseStrip);
             break;
         case LightSceneID::pulse_wave:
-            lightShow_.pulse_wave(deviceState_.speed, deviceState_.waveWidth, deviceState_.currentPalette);
+            lightShow_.pulse_wave(effectiveSpeed, deviceState_.waveWidth, deviceState_.currentPalette);
             break;
         case LightSceneID::meteor_shower:
-            lightShow_.meteor_shower(deviceState_.speed, deviceState_.meteorCount, deviceState_.trailLength, deviceState_.currentPalette);
+            lightShow_.meteor_shower(effectiveSpeed, deviceState_.meteorCount, deviceState_.trailLength, deviceState_.currentPalette);
             break;
         case LightSceneID::fire_plasma:
-            lightShow_.fire_plasma(deviceState_.speed, deviceState_.heatVariance, deviceState_.currentPalette);
+            lightShow_.fire_plasma(effectiveSpeed, deviceState_.heatVariance, deviceState_.currentPalette);
             break;
         case LightSceneID::kaleidoscope:
-            lightShow_.kaleidoscope(deviceState_.speed, deviceState_.mirrorCount, deviceState_.currentPalette);
+            lightShow_.kaleidoscope(effectiveSpeed, deviceState_.mirrorCount, deviceState_.currentPalette);
             break;
         case LightSceneID::rainbow_comet:
-            lightShow_.rainbow_comet(deviceState_.speed, deviceState_.cometCount, deviceState_.trailLength);
+            lightShow_.rainbow_comet(effectiveSpeed, deviceState_.cometCount, deviceState_.trailLength);
             break;
         case LightSceneID::matrix_rain:
-            lightShow_.matrix_rain(deviceState_.speed, deviceState_.dropRate, deviceState_.effectColor);
+            lightShow_.matrix_rain(effectiveSpeed, deviceState_.dropRate, deviceState_.effectColor);
             break;
         case LightSceneID::plasma_clouds:
-            lightShow_.plasma_clouds(deviceState_.speed, deviceState_.cloudScale, deviceState_.currentPalette);
+            lightShow_.plasma_clouds(effectiveSpeed, deviceState_.cloudScale, deviceState_.currentPalette);
             break;
         case LightSceneID::lava_lamp:
-            lightShow_.lava_lamp(deviceState_.speed, deviceState_.blobCount, deviceState_.currentPalette);
+            lightShow_.lava_lamp(effectiveSpeed, deviceState_.blobCount, deviceState_.currentPalette);
             break;
         case LightSceneID::aurora_borealis:
-            lightShow_.aurora_borealis(deviceState_.speed, deviceState_.waveCount, deviceState_.currentPalette);
+            lightShow_.aurora_borealis(effectiveSpeed, deviceState_.waveCount, deviceState_.currentPalette);
             break;
         case LightSceneID::lightning_storm:
-            lightShow_.lightning_storm(deviceState_.speed, deviceState_.flashIntensity, deviceState_.flashFrequency);
+            lightShow_.lightning_storm(effectiveSpeed, deviceState_.flashIntensity, deviceState_.flashFrequency);
             break;
         case LightSceneID::color_explosion:
-            lightShow_.color_explosion(deviceState_.speed, deviceState_.explosionSize, deviceState_.currentPalette);
+            lightShow_.color_explosion(effectiveSpeed, deviceState_.explosionSize, deviceState_.currentPalette);
             break;
         case LightSceneID::spiral_galaxy:
-            lightShow_.spiral_galaxy(deviceState_.speed, deviceState_.spiralArms, deviceState_.currentPalette);
+            lightShow_.spiral_galaxy(effectiveSpeed, deviceState_.spiralArms, deviceState_.currentPalette);
+            break;
+        case LightSceneID::speedometer:
+            // GPS speedometer effect - blend colors based on current speed
+            if (gpsEnabled_ && deviceState_.positionAvailable) {
+                // Normalize speed to 0.0-1.0 range
+                float normalizedSpeed = constrain((deviceState_.currentSpeed - deviceState_.gpsLowSpeed) / 
+                                                (deviceState_.gpsTopSpeed - deviceState_.gpsLowSpeed), 0.0f, 1.0f);
+                
+                // Use FastLED blend function to interpolate between slow and fast colors
+                CRGB speedColor = blend(deviceState_.gpsSlowColor, deviceState_.gpsFastColor, 
+                                      static_cast<uint8_t>(normalizedSpeed * 255));
+                
+                lightShow_.solid(speedColor);
+            } else {
+                // Fallback to static slow color if no GPS
+                lightShow_.solid(deviceState_.gpsSlowColor);
+            }
+            break;
+        case LightSceneID::position_status:
+            // GPS position status effect - use palette cycling with position-based speed
+            if (gpsEnabled_ && deviceState_.positionAvailable) {
+                // Calculate distance from origin for effect variation
+                float distance = deviceState_.currentPosition.distance_from(deviceState_.origin);
+                // Use distance to modify effect speed (closer = faster cycling, further = slower)
+                // Map distance (0-1000m) to speed (200-20) - closer is faster
+                uint16_t positionSpeed = constrain(map((int)distance, 0, 1000, 200, 20), 20, 200);
+                lightShow_.palette_stream(positionSpeed, deviceState_.currentPalette, deviceState_.reverseStrip);
+            } else {
+                // Fallback to normal palette stream if no GPS
+                lightShow_.palette_stream(effectiveSpeed, deviceState_.currentPalette, deviceState_.reverseStrip);
+            }
             break;
         default:
-            lightShow_.palette_stream(deviceState_.speed, deviceState_.currentPalette, deviceState_.reverseStrip);
+            lightShow_.palette_stream(effectiveSpeed, deviceState_.currentPalette, deviceState_.reverseStrip);
             break;
     }
 }
@@ -652,6 +741,26 @@ void BMDevice::handleColorFeature(const uint8_t* buffer, size_t length) {
     }
 }
 
+void BMDevice::handleSpeedometerFeature(const uint8_t* buffer, size_t length) {
+    if (length >= 7) { // 1 feature byte + 3 slow RGB + 3 fast RGB
+        uint8_t slowR = buffer[1], slowG = buffer[2], slowB = buffer[3];
+        uint8_t fastR = buffer[4], fastG = buffer[5], fastB = buffer[6];
+        
+        deviceState_.gpsSlowColor = CRGB(slowR, slowG, slowB);
+        deviceState_.gpsFastColor = CRGB(fastR, fastG, fastB);
+        
+        Serial.print("[BMDevice] Speedometer colors set - Slow: RGB(");
+        Serial.print(slowR); Serial.print(","); Serial.print(slowG); Serial.print(","); Serial.print(slowB);
+        Serial.print("), Fast: RGB(");
+        Serial.print(fastR); Serial.print(","); Serial.print(fastG); Serial.print(","); Serial.print(fastB);
+        Serial.println(")");
+        
+        updateLightShow();
+    } else {
+        Serial.println("[BMDevice] Invalid speedometer data length");
+    }
+}
+
 // Defaults Management Methods
 bool BMDevice::loadDefaults() {
     DeviceDefaults defaults = defaults_.getCurrentDefaults();
@@ -712,6 +821,11 @@ void BMDevice::applyDefaults() {
     deviceState_.reverseStrip = defaults.reverseDirection;
     deviceState_.effectColor = defaults.effectColor;
     deviceState_.power = defaults.autoOn;
+    
+    // Apply GPS speed settings
+    deviceState_.gpsLowSpeed = defaults.gpsLowSpeed;
+    deviceState_.gpsTopSpeed = defaults.gpsTopSpeed;
+    deviceState_.gpsLightshowSpeedEnabled = defaults.gpsLightshowSpeedEnabled;
     
     // Apply status update interval
     statusUpdateInterval_ = defaults.statusUpdateInterval;
@@ -814,6 +928,49 @@ void BMDevice::handleSetAutoOnFeature(const uint8_t* buffer, size_t length) {
         if (success) {
             Serial.print("[BMDevice] Auto-on set to: ");
             Serial.println(autoOn ? "true" : "false");
+        }
+    }
+}
+
+void BMDevice::handleSetGPSLowSpeedFeature(const uint8_t* buffer, size_t length) {
+    if (length >= 5) {
+        float speed;
+        memcpy(&speed, buffer + 1, sizeof(float));
+        bool success = defaults_.setGPSLowSpeed(speed);
+        if (success) {
+            // Update device state
+            deviceState_.gpsLowSpeed = defaults_.getGPSLowSpeed();
+            Serial.print("[BMDevice] GPS low speed set to: ");
+            Serial.print(speed);
+            Serial.println(" km/h");
+        }
+    }
+}
+
+void BMDevice::handleSetGPSTopSpeedFeature(const uint8_t* buffer, size_t length) {
+    if (length >= 5) {
+        float speed;
+        memcpy(&speed, buffer + 1, sizeof(float));
+        bool success = defaults_.setGPSTopSpeed(speed);
+        if (success) {
+            // Update device state
+            deviceState_.gpsTopSpeed = defaults_.getGPSTopSpeed();
+            Serial.print("[BMDevice] GPS top speed set to: ");
+            Serial.print(speed);
+            Serial.println(" km/h");
+        }
+    }
+}
+
+void BMDevice::handleSetGPSLightshowSpeedEnabledFeature(const uint8_t* buffer, size_t length) {
+    if (length >= 2) {
+        bool enabled = buffer[1] != 0;
+        bool success = defaults_.setGPSLightshowSpeedEnabled(enabled);
+        if (success) {
+            // Update device state
+            deviceState_.gpsLightshowSpeedEnabled = enabled;
+            Serial.print("[BMDevice] GPS lightshow speed control ");
+            Serial.println(enabled ? "enabled" : "disabled");
         }
     }
 }
@@ -1067,7 +1224,7 @@ void BMDevice::sendDeviceConfigChunk() {
     // Device configuration - abbreviated keys
     doc["devType"] = defaults.deviceType;
     doc["auto"] = defaults.autoOn;
-    doc["gps"] = defaults.gpsEnabled;
+    doc["gps"] = gpsEnabled_;  // Use runtime GPS state, not saved defaults
     doc["interval"] = defaults.statusUpdateInterval;
     doc["owner"] = defaults.owner;
     doc["deviceName"] = defaults.deviceName;

@@ -70,6 +70,12 @@ bool BMDeviceDefaults::loadDefaults(DeviceDefaults& defaults) {
     defaults.activeLEDStrips = preferences_.getInt(PREF_LED_COUNT, defaults.activeLEDStrips);
     defaults.statusUpdateInterval = preferences_.getULong(PREF_STATUS_INTERVAL, defaults.statusUpdateInterval);
     defaults.gpsEnabled = preferences_.getBool(PREF_GPS_ENABLED, defaults.gpsEnabled);
+    
+    // Load GPS speed settings
+    defaults.gpsLowSpeed = preferences_.getFloat(PREF_GPS_LOW_SPEED, defaults.gpsLowSpeed);
+    defaults.gpsTopSpeed = preferences_.getFloat(PREF_GPS_TOP_SPEED, defaults.gpsTopSpeed);
+    defaults.gpsLightshowSpeedEnabled = preferences_.getBool(PREF_GPS_LIGHTSHOW_SPEED_ENABLED, defaults.gpsLightshowSpeedEnabled);
+    
     defaults.version = preferences_.getInt(PREF_VERSION, DEFAULTS_VERSION);
     
     // Load effect color
@@ -137,6 +143,12 @@ bool BMDeviceDefaults::saveDefaults(const DeviceDefaults& defaults) {
     success &= preferences_.putInt(PREF_LED_COUNT, validatedDefaults.activeLEDStrips);
     success &= preferences_.putULong(PREF_STATUS_INTERVAL, validatedDefaults.statusUpdateInterval);
     success &= preferences_.putBool(PREF_GPS_ENABLED, validatedDefaults.gpsEnabled);
+    
+    // Save GPS speed settings
+    success &= preferences_.putFloat(PREF_GPS_LOW_SPEED, validatedDefaults.gpsLowSpeed);
+    success &= preferences_.putFloat(PREF_GPS_TOP_SPEED, validatedDefaults.gpsTopSpeed);
+    success &= preferences_.putBool(PREF_GPS_LIGHTSHOW_SPEED_ENABLED, validatedDefaults.gpsLightshowSpeedEnabled);
+    
     success &= preferences_.putInt(PREF_VERSION, validatedDefaults.version);
     
     // Save effect color
@@ -260,6 +272,37 @@ bool BMDeviceDefaults::setEffectColor(CRGB color) {
 bool BMDeviceDefaults::setGPSEnabled(bool enabled) {
     currentDefaults_.gpsEnabled = enabled;
     return preferences_.putBool(PREF_GPS_ENABLED, enabled);
+}
+
+bool BMDeviceDefaults::setGPSLowSpeed(float speed) {
+    currentDefaults_.gpsLowSpeed = constrain(speed, 0.0f, 100.0f);
+    return preferences_.putFloat(PREF_GPS_LOW_SPEED, currentDefaults_.gpsLowSpeed);
+}
+
+bool BMDeviceDefaults::setGPSTopSpeed(float speed) {
+    currentDefaults_.gpsTopSpeed = constrain(speed, 0.0f, 200.0f);
+    // Ensure top speed is always higher than low speed
+    if (currentDefaults_.gpsTopSpeed <= currentDefaults_.gpsLowSpeed) {
+        currentDefaults_.gpsTopSpeed = currentDefaults_.gpsLowSpeed + 1.0f;
+    }
+    return preferences_.putFloat(PREF_GPS_TOP_SPEED, currentDefaults_.gpsTopSpeed);
+}
+
+bool BMDeviceDefaults::setGPSLightshowSpeedEnabled(bool enabled) {
+    currentDefaults_.gpsLightshowSpeedEnabled = enabled;
+    return preferences_.putBool(PREF_GPS_LIGHTSHOW_SPEED_ENABLED, enabled);
+}
+
+float BMDeviceDefaults::getGPSLowSpeed() {
+    return currentDefaults_.gpsLowSpeed;
+}
+
+float BMDeviceDefaults::getGPSTopSpeed() {
+    return currentDefaults_.gpsTopSpeed;
+}
+
+bool BMDeviceDefaults::isGPSLightshowSpeedEnabled() {
+    return currentDefaults_.gpsLightshowSpeedEnabled;
 }
 
 bool BMDeviceDefaults::setDeviceType(const String& deviceType) {
@@ -443,6 +486,15 @@ void BMDeviceDefaults::constrainValues(DeviceDefaults& defaults) {
     // Ensure brightness doesn't exceed max brightness
     if (defaults.brightness > defaults.maxBrightness) {
         defaults.brightness = defaults.maxBrightness;
+    }
+    
+    // Constrain GPS speed values
+    defaults.gpsLowSpeed = constrain(defaults.gpsLowSpeed, 0.0f, 100.0f);
+    defaults.gpsTopSpeed = constrain(defaults.gpsTopSpeed, 0.0f, 200.0f);
+    
+    // Ensure top speed is always higher than low speed
+    if (defaults.gpsTopSpeed <= defaults.gpsLowSpeed) {
+        defaults.gpsTopSpeed = defaults.gpsLowSpeed + 1.0f;
     }
     
     // Constrain string lengths

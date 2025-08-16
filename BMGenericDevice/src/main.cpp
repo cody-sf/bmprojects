@@ -5,9 +5,6 @@
 #define FEATURES_UUID "3927e9db-012b-4db9-8890-984fe28faf83"
 #define STATUS_UUID "c054c450-cf93-4e6f-848e-2c521e739f4b"
 
-
-
-
 // Chip-specific LED Configuration
 #ifdef TARGET_ESP32_C6
     // ESP32-C6 configuration (single strip for now)
@@ -100,6 +97,17 @@
 BMDevice device(SERVICE_UUID, FEATURES_UUID, STATUS_UUID);
 
 #ifdef TARGET_SLUT
+// Fade-up variables to prevent power spikes at startup (SLUT only)
+int targetBrightness = 50;  // Will be set from loaded defaults
+int currentFadeBrightness = 1;  // Start very low
+unsigned long fadeStartTime = 0;
+const unsigned long FADE_DURATION = 3000;  // 3 seconds fade-up
+bool fadeUpComplete = false;
+
+
+#endif
+
+#ifdef TARGET_SLUT
 // Function to cycle through curated light show effects
 void cycleEffect(int direction) {
     // Curated list of visually distinct effects
@@ -180,8 +188,18 @@ void handleEncoderChange() {
             case MENU_BRIGHTNESS: {
                 int brightness = device.getState().brightness;
                 brightness += direction * 10; // Change by 10 each step
-                brightness = constrain(brightness, 10, 175);
+                brightness = constrain(brightness, 0, 125);
                 device.setBrightness(brightness);
+                
+                // If user manually adjusts brightness, update target and skip fade-up (SLUT only)
+                #ifdef TARGET_SLUT
+                if (!fadeUpComplete) {
+                    targetBrightness = brightness;
+                    fadeUpComplete = true;
+                    Serial.println("=== Manual brightness adjustment - fade-up cancelled ===");
+                }
+                #endif
+                
                 Serial.print("Brightness: ");
                 Serial.println(brightness);
                 break;
@@ -249,11 +267,13 @@ void handleEncoderChange() {
     }
     lastState = currentState;
 }
+
+
 #endif
 
 void setup() {
     Serial.begin(115200);
-    delay(1000);
+    delay(100);
     
     Serial.println("=== BMGeneric Device Starting ===");
     
@@ -274,8 +294,8 @@ void setup() {
     device.addLEDStrip<WS2812B, 27, COLOR_ORDER>(leds2, LEDS_PER_STRIP);  // Strip 2: GPIO 27
     device.addLEDStrip<WS2812B, 26, COLOR_ORDER>(leds3, LEDS_PER_STRIP);  // Strip 3: GPIO 14
     device.addLEDStrip<WS2812B, 25, RGB>(leds4, LEDS_PER_STRIP);  //12v 1
-    device.addLEDStrip<WS2812B, 33, RGB>(leds5, LEDS_PER_STRIP);  // Strip 5: GPIO 13
-    device.addLEDStrip<WS2812B, 32, COLOR_ORDER>(leds6, LEDS_PER_STRIP);  // Strip 6: GPIO 18
+    device.addLEDStrip<WS2812B, 33, RGB>(leds5, LEDS_PER_STRIP);  // 12v 2
+    device.addLEDStrip<WS2812B, 32, RGB>(leds6, LEDS_PER_STRIP);  // 12v 3
     
 #else
     // ESP32 classic: 8 strips on the specified pinspio 
@@ -334,6 +354,25 @@ void setup() {
         while (1);
     }
     
+#ifdef TARGET_SLUT
+    // Store the target brightness that was loaded from defaults
+    targetBrightness = device.getState().brightness;
+    
+    // Override with very low brightness to start the fade-up
+    device.setBrightness(currentFadeBrightness);
+    
+    // Start the fade timer
+    fadeStartTime = millis();
+    
+    Serial.print("=== Starting brightness fade-up ===");
+    Serial.print("Target brightness: ");
+    Serial.print(targetBrightness);
+    Serial.print(", Starting from: ");
+    Serial.println(currentFadeBrightness);
+    
+
+#endif
+    
     Serial.println("=== BMGeneric Device Ready ===");
     Serial.println("All configuration is now handled by BMDevice library!");
     Serial.println("Use BLE commands to configure the device:");
@@ -366,6 +405,34 @@ void setup() {
 }
 
 void loop() {
+#ifdef TARGET_SLUT
+    // Handle brightness fade-up to prevent power spikes (SLUT only)
+    if (!fadeUpComplete) {
+        unsigned long elapsed = millis() - fadeStartTime;
+        
+        if (elapsed < FADE_DURATION) {
+            // Calculate current brightness using smooth interpolation
+            float progress = (float)elapsed / FADE_DURATION;
+            // Use ease-out curve for smoother fade
+            progress = 1.0f - (1.0f - progress) * (1.0f - progress);
+            
+            int newBrightness = currentFadeBrightness + (progress * (targetBrightness - currentFadeBrightness));
+            newBrightness = constrain(newBrightness, 1, targetBrightness);
+            
+            // Only update if brightness changed to avoid unnecessary calls
+            if (newBrightness != device.getState().brightness) {
+                device.setBrightness(newBrightness);
+            }
+        } else {
+            // Fade complete - set final target brightness
+            device.setBrightness(targetBrightness);
+            fadeUpComplete = true;
+            Serial.print("=== Brightness fade-up complete! Final brightness: ");
+            Serial.println(targetBrightness);
+        }
+    }
+#endif
+    
     device.loop();
     
 #ifdef TARGET_SLUT

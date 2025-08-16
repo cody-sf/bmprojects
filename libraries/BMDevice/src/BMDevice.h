@@ -124,6 +124,9 @@ private:
     void updateLightShow();
     void sendStatusUpdate();
     
+    // GPS speed mapping helper
+    uint16_t calculateEffectiveSpeed();
+    
     // Chunked status update methods
     void handleChunkedStatusUpdate();
     void sendBasicStatusChunk();
@@ -139,6 +142,7 @@ private:
     void handleDirectionFeature(const uint8_t* buffer, size_t length);
     void handleOriginFeature(const uint8_t* buffer, size_t length);
     void handlePaletteFeature(const uint8_t* buffer, size_t length);
+    void handleSpeedometerFeature(const uint8_t* buffer, size_t length);
     void handleEffectFeature(const uint8_t* buffer, size_t length);
     void handleEffectParameterFeature(uint8_t feature, const uint8_t* buffer, size_t length);
     void handleColorFeature(const uint8_t* buffer, size_t length);
@@ -151,6 +155,11 @@ private:
     void handleSetMaxBrightnessFeature(const uint8_t* buffer, size_t length);
     void handleSetDeviceOwnerFeature(const uint8_t* buffer, size_t length);
     void handleSetAutoOnFeature(const uint8_t* buffer, size_t length);
+    
+    // GPS Speed feature handlers
+    void handleSetGPSLowSpeedFeature(const uint8_t* buffer, size_t length);
+    void handleSetGPSTopSpeedFeature(const uint8_t* buffer, size_t length);
+    void handleSetGPSLightshowSpeedEnabledFeature(const uint8_t* buffer, size_t length);
     
     // Generic device configuration handlers
     void handleSetDeviceTypeFeature(const uint8_t* buffer, size_t length);
