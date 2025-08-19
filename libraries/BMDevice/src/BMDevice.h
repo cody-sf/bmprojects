@@ -4,7 +4,9 @@
 #include <Arduino.h>
 #include <FastLED.h>
 #include <LightShow.h>
+#ifndef TARGET_ESP32_C6
 #include <LocationService.h>
+#endif
 #include <TinyGPSPlus.h>
 #include <HardwareSerial.h>
 #include <vector>
@@ -49,8 +51,10 @@ public:
     }
     
     // GPS Integration (optional)
+#ifndef TARGET_ESP32_C6
     void enableGPS(int rxPin = 21, int txPin = 22, int baud = DEFAULT_GPS_BAUD);
     void setLocationService(LocationService* locationService);
+#endif
     
     // Device lifecycle
     bool begin();
@@ -60,7 +64,9 @@ public:
     BMDeviceState& getState() { return deviceState_; }
     LightShow& getLightShow() { return lightShow_; }
     BMBluetoothHandler& getBluetoothHandler() { return bluetoothHandler_; }
+#ifndef TARGET_ESP32_C6
     LocationService* getLocationService() { return locationService_; }
+#endif
     BMDeviceDefaults& getDefaults() { return defaults_; }
     
     // Configuration
@@ -96,8 +102,10 @@ private:
     
     // GPS components (optional)
     bool gpsEnabled_;
+#ifndef TARGET_ESP32_C6
     bool ownGPSSerial_; // True if we created the LocationService
     LocationService* locationService_;
+#endif
     
     // Timing
     unsigned long lastBluetoothSync_;

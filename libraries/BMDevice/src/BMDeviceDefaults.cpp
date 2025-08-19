@@ -76,6 +76,9 @@ bool BMDeviceDefaults::loadDefaults(DeviceDefaults& defaults) {
     defaults.gpsTopSpeed = preferences_.getFloat(PREF_GPS_TOP_SPEED, defaults.gpsTopSpeed);
     defaults.gpsLightshowSpeedEnabled = preferences_.getBool(PREF_GPS_LIGHTSHOW_SPEED_ENABLED, defaults.gpsLightshowSpeedEnabled);
     
+    // Load sync settings
+    defaults.syncEnabled = preferences_.getBool(PREF_SYNC_ENABLED, defaults.syncEnabled);
+    
     defaults.version = preferences_.getInt(PREF_VERSION, DEFAULTS_VERSION);
     
     // Load effect color
@@ -303,6 +306,15 @@ float BMDeviceDefaults::getGPSTopSpeed() {
 
 bool BMDeviceDefaults::isGPSLightshowSpeedEnabled() {
     return currentDefaults_.gpsLightshowSpeedEnabled;
+}
+
+bool BMDeviceDefaults::setSyncEnabled(bool enabled) {
+    currentDefaults_.syncEnabled = enabled;
+    return preferences_.putBool(PREF_SYNC_ENABLED, enabled);
+}
+
+bool BMDeviceDefaults::isSyncEnabled() {
+    return currentDefaults_.syncEnabled;
 }
 
 bool BMDeviceDefaults::setDeviceType(const String& deviceType) {

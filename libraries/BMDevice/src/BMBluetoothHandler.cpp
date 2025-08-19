@@ -82,6 +82,20 @@ void BMBluetoothHandler::sendStatusUpdate(const String& status) {
     }
 }
 
+void BMBluetoothHandler::startAdvertising() {
+    if (initialized_) {
+        BLE.advertise();
+        Serial.println("[BMBluetoothHandler] Advertising started");
+    }
+}
+
+void BMBluetoothHandler::stopAdvertising() {
+    if (initialized_) {
+        BLE.stopAdvertise();
+        Serial.println("[BMBluetoothHandler] Advertising stopped");
+    }
+}
+
 void BMBluetoothHandler::onBLEConnected(BLEDevice central) {
     if (instance_) {
         Serial.print("[BMBluetoothHandler] Connected to central: ");

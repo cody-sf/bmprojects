@@ -49,6 +49,7 @@ struct LEDStripConfig {
 #define PREF_GPS_LOW_SPEED "gpsLowSpeed"
 #define PREF_GPS_TOP_SPEED "gpsTopSpeed"
 #define PREF_GPS_LIGHTSHOW_SPEED_ENABLED "gpsLightshowSpeedEnabled"
+#define PREF_SYNC_ENABLED "syncEnabled"
 
 struct DeviceDefaults {
     // Core settings
@@ -78,6 +79,9 @@ struct DeviceDefaults {
     float gpsLowSpeed;  // km/h - speed for maximum lightshow delay
     float gpsTopSpeed;  // km/h - speed for minimum lightshow delay
     bool gpsLightshowSpeedEnabled;
+    
+    // Sync settings
+    bool syncEnabled;
     
     // Version for migration
     int version;
@@ -113,6 +117,9 @@ struct DeviceDefaults {
         gpsLowSpeed = 5.0;   // 5 km/h - walking speed for max delay
         gpsTopSpeed = 25.0;  // 25 km/h - biking speed for min delay
         gpsLightshowSpeedEnabled = false;
+        
+        // Sync defaults
+        syncEnabled = true;    // Enable sync by default
         
         version = DEFAULTS_VERSION;
     }
@@ -160,6 +167,10 @@ public:
     float getGPSLowSpeed();
     float getGPSTopSpeed();
     bool isGPSLightshowSpeedEnabled();
+    
+    // Sync configuration
+    bool setSyncEnabled(bool enabled);
+    bool isSyncEnabled();
     
     // Get current defaults
     DeviceDefaults getCurrentDefaults();

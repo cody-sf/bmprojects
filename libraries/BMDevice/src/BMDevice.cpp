@@ -2,7 +2,11 @@
 
 BMDevice::BMDevice(const char* deviceName, const char* serviceUUID, const char* featuresUUID, const char* statusUUID)
     : bluetoothHandler_(deviceName, serviceUUID, featuresUUID, statusUUID), lightShow_(std::vector<CLEDController*>(), deviceClock_),
-      gpsEnabled_(false), ownGPSSerial_(false), locationService_(nullptr), lastBluetoothSync_(0), 
+      gpsEnabled_(false),
+#ifndef TARGET_ESP32_C6
+      ownGPSSerial_(false), locationService_(nullptr),
+#endif
+      lastBluetoothSync_(0), 
       statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL), statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0) {
     
     // Set up callbacks
@@ -17,7 +21,11 @@ BMDevice::BMDevice(const char* deviceName, const char* serviceUUID, const char* 
 
 BMDevice::BMDevice(const char* serviceUUID, const char* featuresUUID, const char* statusUUID)
     : bluetoothHandler_("", serviceUUID, featuresUUID, statusUUID), lightShow_(std::vector<CLEDController*>(), deviceClock_),
-      gpsEnabled_(false), ownGPSSerial_(false), locationService_(nullptr), lastBluetoothSync_(0), 
+      gpsEnabled_(false),
+#ifndef TARGET_ESP32_C6
+      ownGPSSerial_(false), locationService_(nullptr),
+#endif
+      lastBluetoothSync_(0), 
       statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL), dynamicNaming_(true), statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0) {
     
     // Initialize LED arrays
@@ -36,9 +44,11 @@ BMDevice::BMDevice(const char* serviceUUID, const char* featuresUUID, const char
 }
 
 BMDevice::~BMDevice() {
+#ifndef TARGET_ESP32_C6
     if (ownGPSSerial_ && locationService_) {
         delete locationService_;
     }
+#endif
     
     // Clean up LED arrays
     for (int i = 0; i < MAX_LED_STRIPS; i++) {
@@ -49,6 +59,7 @@ BMDevice::~BMDevice() {
     }
 }
 
+#ifndef TARGET_ESP32_C6
 void BMDevice::enableGPS(int rxPin, int txPin, int baud) {
     Serial.printf("[BMDevice] enableGPS() called with pins RX:%d TX:%d @ %d baud\n", rxPin, txPin, baud);
     
@@ -72,7 +83,9 @@ void BMDevice::enableGPS(int rxPin, int txPin, int baud) {
                  rxPin, txPin, baud);
     Serial.println("[BMDevice] GPS will auto-update position and speed");
 }
+#endif
 
+#ifndef TARGET_ESP32_C6
 void BMDevice::setLocationService(LocationService* locationService) {
     locationService_ = locationService;
     gpsEnabled_ = true;
@@ -86,6 +99,7 @@ void BMDevice::setLocationService(LocationService* locationService) {
     
     Serial.println("[BMDevice] Using external LocationService for GPS");
 }
+#endif
 
 bool BMDevice::begin() {
     Serial.begin(115200);
@@ -316,6 +330,7 @@ void BMDevice::handleConnectionChange(bool connected) {
 }
 
 void BMDevice::updateGPS() {
+#ifndef TARGET_ESP32_C6
     static unsigned long lastGPSDebug = 0;
     static bool lastPositionState = false;
     
@@ -370,6 +385,11 @@ void BMDevice::updateGPS() {
             lastGPSDebug = millis();
         }
     }
+#else
+    // GPS not supported on C6 - just disable GPS features
+    deviceState_.positionAvailable = false;
+    deviceState_.currentSpeed = 0.0f;
+#endif
 }
 
 uint16_t BMDevice::calculateEffectiveSpeed() {

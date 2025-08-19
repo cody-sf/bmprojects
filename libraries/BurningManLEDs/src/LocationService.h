@@ -1,7 +1,13 @@
 #ifndef LOCATIONSERVICE_H
 #define LOCATIONSERVICE_H
 
+// Only compile GPS functionality if enabled
+#ifndef TARGET_ESP32_C6
 #include <TinyGPS++.h>
+#define LOCATION_SERVICE_ENABLED 1
+#else
+#define LOCATION_SERVICE_ENABLED 0
+#endif
 #include "Position.h"
 
 #define SPEED_HISTORY_SIZE 10
@@ -12,6 +18,7 @@
 #define GPS_RX_PIN 21 // Example pin for GPS RX
 #define GPS_TX_PIN 22 // Example pin for GPS TX
 
+#if LOCATION_SERVICE_ENABLED
 class LocationService
 {
 public:
@@ -43,5 +50,6 @@ private:
     float last_logged_speed_;
     unsigned long last_gps_log_time_;
 };
+#endif // LOCATION_SERVICE_ENABLED
 
 #endif // LOCATIONSERVICE_H

@@ -43,6 +43,7 @@
 #define BLE_FEATURE_SET_GPS_LOW_SPEED 0x21
 #define BLE_FEATURE_SET_GPS_TOP_SPEED 0x22
 #define BLE_FEATURE_SET_GPS_LIGHTSHOW_SPEED_ENABLED 0x23
+#define BLE_FEATURE_SET_SYNC_ENABLED 0x24
 
 // Generic Device Configuration Features  
 #define BLE_FEATURE_SET_OWNER 0x30
@@ -75,6 +76,10 @@ public:
     bool isConnected() const { return deviceConnected_; }
     unsigned long getLastSyncTime() const { return lastBluetoothSync_; }
     void updateSyncTime() { lastBluetoothSync_ = millis(); }
+
+    // Advertising control (for ESP-NOW coexistence)
+    void startAdvertising();
+    void stopAdvertising();
     
 private:
     // BLE objects

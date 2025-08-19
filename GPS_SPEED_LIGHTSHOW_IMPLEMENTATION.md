@@ -131,3 +131,4 @@ When GPS speed control is active, you'll see debug output every 5 seconds:
 - **Lightshow Speed Range**: 20ms to 200ms delay
 
 The implementation provides a smooth, responsive connection between your physical movement and the visual effects of your LED devices!
+

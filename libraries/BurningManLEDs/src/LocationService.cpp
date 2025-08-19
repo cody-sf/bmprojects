@@ -1,4 +1,6 @@
 #include "LocationService.h"
+
+#if LOCATION_SERVICE_ENABLED
 #include <time.h>
 
 LocationService::LocationService() : initial_gps_sample_acquired_(false),
@@ -213,3 +215,4 @@ void LocationService::update_time(int year, int month, int day, int hour, int mi
     struct timeval now = {.tv_sec = t_of_day};
     settimeofday(&now, NULL);
 }
+#endif // LOCATION_SERVICE_ENABLED
