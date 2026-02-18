@@ -23,6 +23,15 @@ public:
     /// Call every loop() - handles WiFi, update check, and OTA
     void loop();
 
+    /// Set WiFi credentials (from BLE). Stored in Preferences.
+    void setWifiCredentials(const char* ssid, const char* password);
+
+    /// Get WiFi status as JSON for BLE response: {"wifiConfigured":bool,"wifiSsid":"..."}
+    String getWifiStatusJson() const;
+
+    /// Check if WiFi credentials are configured (from Preferences or build config)
+    bool hasWifiCredentials() const;
+
 private:
     enum State {
         IDLE,

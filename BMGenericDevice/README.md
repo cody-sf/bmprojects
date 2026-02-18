@@ -76,6 +76,8 @@ The device can be configured through your mobile app using these BLE commands (d
 | Command | Code | Constant | Description | Data Format |
 |---------|------|----------|-------------|-------------|
 | Set Owner | 0x30 | BLE_FEATURE_SET_OWNER | Set device owner name | ASCII string |
+| Set WiFi Credentials | 0x35 | BLE_FEATURE_SET_WIFI_CREDENTIALS | Set OTA WiFi network (SSID + password) | SSID\0password |
+| Get WiFi Status | 0x36 | BLE_FEATURE_GET_WIFI_STATUS | Get whether WiFi is configured (returns wifiConfigured, wifiSsid) | None |
 | Set Device Type | 0x31 | BLE_FEATURE_SET_DEVICE_TYPE | Set device type | ASCII string |
 | Configure LED Strip | 0x32 | BLE_FEATURE_CONFIGURE_LED_STRIP | Configure LED strip parameters | See below |
 | Get Configuration | 0x33 | BLE_FEATURE_GET_CONFIGURATION | Request current configuration | No data |
@@ -249,10 +251,13 @@ BMGenericDevice supports fleet-wide HTTPS OTA updates. All devices on WiFi can u
 
 1. Edit `include/OTAConfig.h`:
    - Set `OTA_ENABLED` to `1`
-   - Set `OTA_WIFI_SSID` and `OTA_WIFI_PASSWORD` for your network
    - Set `OTA_FIRMWARE_URL` to your firmware binary URL (HTTPS)
 
-2. Build and flash once via USB. After that, devices will check for updates automatically.
+2. **WiFi credentials** (choose one):
+   - **Preferred:** Set via RNUmbrella app → Device Settings → Advanced Settings → OTA/WiFi
+   - Fallback: Set `OTA_WIFI_SSID` and `OTA_WIFI_PASSWORD` in `OTAConfig.h`
+
+3. Build and flash once via USB. After that, devices will check for updates automatically.
 
 ### Hosting Firmware
 

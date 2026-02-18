@@ -360,6 +360,27 @@ void setup() {
     }
 
 #if OTA_ENABLED
+    device.setCustomFeatureHandler([&](uint8_t feature, const uint8_t* data, size_t length) {
+        if (feature == BLE_FEATURE_SET_WIFI_CREDENTIALS && length >= 2) {
+            const char* p = (const char*)(data + 1);
+            size_t ssidLen = strnlen(p, length - 1);
+            if (ssidLen < length - 1) {
+                const char* pass = p + ssidLen + 1;
+                size_t passLen = length - 1 - ssidLen - 1;
+                char ssidBuf[33] = {0};
+                char passBuf[64] = {0};
+                memcpy(ssidBuf, p, ssidLen < 32 ? ssidLen : 32);
+                memcpy(passBuf, pass, passLen < 63 ? passLen : 63);
+                ota.setWifiCredentials(ssidBuf, passBuf);
+                return true;
+            }
+        }
+        if (feature == BLE_FEATURE_GET_WIFI_STATUS) {
+            device.getBluetoothHandler().sendStatusUpdate(ota.getWifiStatusJson());
+            return true;
+        }
+        return false;
+    });
     ota.begin();
     Serial.println("[OTA] Update checks enabled - will check after boot delay");
 #endif

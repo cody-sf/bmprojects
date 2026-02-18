@@ -19,13 +19,23 @@
 
 #if OTA_ENABLED
 
-// WiFi credentials - device connects to this network to fetch updates
-#define OTA_WIFI_SSID     "your-wifi-ssid"
-#define OTA_WIFI_PASSWORD "your-wifi-password"
+// WiFi credentials - set via BLE from RNUmbrella app (preferred) or fallback to these
+// When empty strings, device uses credentials from app only
+#define OTA_WIFI_SSID     ""
+#define OTA_WIFI_PASSWORD ""
 
-// URL to firmware binary (HTTPS recommended for production)
-// For HTTP, you may need to enable CONFIG_OTA_ALLOW_HTTP in sdkconfig
-#define OTA_FIRMWARE_URL  "https://example.com/firmware.bin"
+// Base URL for GitHub Releases - update with your repo. Tag is appended by release workflow.
+// Format: https://github.com/OWNER/REPO/releases/download/TAG/firmware-TARGET.bin
+#define OTA_FIRMWARE_BASE  "https://github.com/YOUR_USERNAME/YOUR_REPO/releases/download"
+
+// Per-target firmware URLs (each build fetches its own binary)
+#if defined(TARGET_SLUT)
+  #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-slut.bin"
+#elif defined(TARGET_ESP32_C6)
+  #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-c6.bin"
+#else
+  #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-esp32.bin"
+#endif
 
 // How often to check for updates (ms). 0 = check once at boot, then every 24h
 #define OTA_CHECK_INTERVAL_MS  (60 * 60 * 1000)  // 1 hour
