@@ -45,6 +45,8 @@ private:
     State state_ = IDLE;
     unsigned long lastCheckTime_ = 0;
     unsigned long bootCompleteTime_ = 0;
+    unsigned long wifiConnectStart_ = 0;
+    unsigned long updateStartTime_ = 0;
     bool bootDelayComplete_ = false;
 
     void handleConnecting();

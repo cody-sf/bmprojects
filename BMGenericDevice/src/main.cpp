@@ -360,20 +360,29 @@ void setup() {
     }
 
 #if OTA_ENABLED
+    static char pendingSsid[33] = {0};
+
     device.setCustomFeatureHandler([&](uint8_t feature, const uint8_t* data, size_t length) {
-        if (feature == BLE_FEATURE_SET_WIFI_CREDENTIALS && length >= 2) {
-            const char* p = (const char*)(data + 1);
-            size_t ssidLen = strnlen(p, length - 1);
-            if (ssidLen < length - 1) {
-                const char* pass = p + ssidLen + 1;
-                size_t passLen = length - 1 - ssidLen - 1;
-                char ssidBuf[33] = {0};
-                char passBuf[64] = {0};
-                memcpy(ssidBuf, p, ssidLen < 32 ? ssidLen : 32);
-                memcpy(passBuf, pass, passLen < 63 ? passLen : 63);
-                ota.setWifiCredentials(ssidBuf, passBuf);
-                return true;
+        if (feature == BLE_FEATURE_SET_WIFI_SSID && length >= 2) {
+            size_t ssidLen = length - 1;
+            if (ssidLen > 32) ssidLen = 32;
+            memset(pendingSsid, 0, sizeof(pendingSsid));
+            memcpy(pendingSsid, data + 1, ssidLen);
+            Serial.printf("[OTA] WiFi SSID buffered: %s (waiting for password)\n", pendingSsid);
+            return true;
+        }
+        if (feature == BLE_FEATURE_SET_WIFI_PASSWORD && length >= 2) {
+            char passBuf[64] = {0};
+            size_t passLen = length - 1;
+            if (passLen > 63) passLen = 63;
+            memcpy(passBuf, data + 1, passLen);
+            if (strlen(pendingSsid) > 0) {
+                ota.setWifiCredentials(pendingSsid, passBuf);
+                memset(pendingSsid, 0, sizeof(pendingSsid));
+            } else {
+                Serial.println("[OTA] Password received but no SSID buffered - ignoring");
             }
+            return true;
         }
         if (feature == BLE_FEATURE_GET_WIFI_STATUS) {
             device.getBluetoothHandler().sendStatusUpdate(ota.getWifiStatusJson());
