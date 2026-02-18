@@ -81,6 +81,9 @@ enum AvailablePalettes : uint8_t
     moltenmetal
 };
 
+// Trivial RGB for union members (CRGB has non-trivial ctor, breaks union default-init on strict compilers)
+struct SceneRGB { uint8_t r, g, b; };
+
 struct LightScene
 {
     LightSceneID scene_id;
@@ -93,10 +96,7 @@ struct LightScene
     bool direction;
     union
     {
-        struct
-        {
-            CRGB color;
-        } solid;
+        struct { SceneRGB color; } solid;
         struct
         {
             uint16_t duration;
@@ -127,19 +127,19 @@ struct LightScene
             uint16_t duration_on;
             uint16_t duration_off;
             uint16_t duration_between_sets;
-            CRGB color;
+            SceneRGB color;
         } strobe;
         struct
         {
             uint16_t duration;
             uint8_t density;
-            CRGB color;
+            SceneRGB color;
         } sparkle;
         struct
         {
             uint16_t duration;
             uint8_t dimness;
-            CRGB color;
+            SceneRGB color;
         } breathe;
 
         struct
@@ -190,7 +190,7 @@ struct LightScene
         {
             uint16_t duration;
             uint8_t drop_rate;
-            CRGB color;
+            SceneRGB color;
         } matrix_rain;
         
         struct

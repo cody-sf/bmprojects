@@ -181,7 +181,7 @@ void LightShow::solid(const CRGB &color)
 {
     LightScene new_scene = {};
     new_scene.scene_id = LightSceneID::solid;
-    new_scene.scenes.solid.color = color;
+    new_scene.scenes.solid.color = {color.r, color.g, color.b};
     new_scene.color = color;
     apply_scene_updates(new_scene);
 }
@@ -278,7 +278,7 @@ void LightShow::strobe(uint16_t num_flashes, uint16_t duration_on, uint16_t dura
     new_scene.scenes.strobe.duration_on = duration_on;
     new_scene.scenes.strobe.duration_off = duration_off;
     new_scene.scenes.strobe.duration_between_sets = duration_between_sets;
-    new_scene.scenes.strobe.color = color;
+    new_scene.scenes.strobe.color = {color.r, color.g, color.b};
     apply_scene_updates(new_scene);
 
     if (!scene_changed_)
@@ -296,7 +296,7 @@ void LightShow::sparkle(uint16_t duration, uint8_t density, CRGB color)
     new_scene.scene_id = LightSceneID::sparkle;
     new_scene.scenes.sparkle.duration = duration;
     new_scene.scenes.sparkle.density = density;
-    new_scene.scenes.sparkle.color = color;
+    new_scene.scenes.sparkle.color = {color.r, color.g, color.b};
     apply_scene_updates(new_scene);
 }
 
@@ -306,7 +306,7 @@ void LightShow::breathe(uint16_t duration, uint8_t dimness, CRGB color)
     new_scene.scene_id = LightSceneID::breathe;
     new_scene.scenes.breathe.duration = duration;
     new_scene.scenes.breathe.dimness = dimness;
-    new_scene.scenes.breathe.color = color;
+    new_scene.scenes.breathe.color = {color.r, color.g, color.b};
     apply_scene_updates(new_scene);
 
     if (!scene_changed_)
@@ -314,7 +314,7 @@ void LightShow::breathe(uint16_t duration, uint8_t dimness, CRGB color)
         return;
     }
 
-    setup_breathe_palette_(new_scene.scenes.breathe.dimness, new_scene.scenes.breathe.color);
+    setup_breathe_palette_(new_scene.scenes.breathe.dimness, CRGB(new_scene.scenes.breathe.color.r, new_scene.scenes.breathe.color.g, new_scene.scenes.breathe.color.b));
     start_time_ = clock_.now();
     scale_ = 0;
     palette_index_ = 0;
@@ -596,7 +596,7 @@ void LightShow::render()
                 {
                     for (auto &controller : led_controllers_)
                     {
-                        controller->showColor(active_scene_.scenes.strobe.color, controller->size(), active_scene_.brightness);
+                        controller->showColor(CRGB(active_scene_.scenes.strobe.color.r, active_scene_.scenes.strobe.color.g, active_scene_.scenes.strobe.color.b), controller->size(), active_scene_.brightness);
                     }
 
                     current_frame_duration_ = active_scene_.scenes.strobe.duration_off;
@@ -633,7 +633,7 @@ void LightShow::render()
                 for (size_t i = 0; i < leds_to_light; i++)
                 {
                     size_t position = random(0, num_leds);
-                    leds[position] = active_scene_.scenes.sparkle.color;
+                    leds[position] = CRGB(active_scene_.scenes.sparkle.color.r, active_scene_.scenes.sparkle.color.g, active_scene_.scenes.sparkle.color.b);
                 }
 
                 controller->showLeds(active_scene_.brightness);
@@ -885,7 +885,7 @@ void LightShow::render()
                         uint8_t pos = (matrix_drops_[d] * num_leds) >> 8;
                         if (pos < num_leds)
                         {
-                            leds[pos] = active_scene_.scenes.matrix_rain.color;
+                            leds[pos] = CRGB(active_scene_.scenes.matrix_rain.color.r, active_scene_.scenes.matrix_rain.color.g, active_scene_.scenes.matrix_rain.color.b);
                         }
                         matrix_drops_[d] += 3;
                         if (matrix_drops_[d] == 0) matrix_drops_[d] = 0; // Reset when wrapped
@@ -1154,7 +1154,7 @@ void LightShow::import_scene(const LightScene *buffer)
         setup_spectrum_stream_();
         break;
     case LightSceneID::breathe:
-        setup_breathe_palette_(new_scene.scenes.breathe.dimness, new_scene.scenes.breathe.color);
+        setup_breathe_palette_(new_scene.scenes.breathe.dimness, CRGB(new_scene.scenes.breathe.color.r, new_scene.scenes.breathe.color.g, new_scene.scenes.breathe.color.b));
         start_time_ = now;
         scale_ = 0;
         palette_index_ = 0;
@@ -1454,7 +1454,7 @@ void LightShow::matrix_rain(uint16_t duration, uint8_t drop_rate, CRGB color)
     new_scene.scene_id = LightSceneID::matrix_rain;
     new_scene.scenes.matrix_rain.duration = duration;
     new_scene.scenes.matrix_rain.drop_rate = drop_rate;
-    new_scene.scenes.matrix_rain.color = color;
+    new_scene.scenes.matrix_rain.color = {color.r, color.g, color.b};
     apply_scene_updates(new_scene);
 
     if (!scene_changed_)
