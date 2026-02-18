@@ -1257,6 +1257,7 @@ void BMDevice::sendDeviceConfigChunk() {
     doc["interval"] = defaults.statusUpdateInterval;
     doc["owner"] = defaults.owner;
     doc["deviceName"] = defaults.deviceName;
+    doc["fwVer"] = FIRMWARE_VERSION;
     
     // LED strip configuration - abbreviated
     doc["strips"] = defaults.activeLEDStrips;
