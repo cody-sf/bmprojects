@@ -12,6 +12,7 @@
 #include <ArduinoJson.h>
 #include <esp_https_ota.h>
 #include <esp_http_client.h>
+#include <esp_idf_version.h>
 
 static const char* OTA_PREFS_NAMESPACE = "ota";
 static const char* OTA_PREF_SSID = "ssid";
@@ -59,11 +60,14 @@ static void otaTask(void* param) {
     httpConfig.buffer_size_tx = 2048;
     httpConfig.skip_cert_common_name_check = true;
 
+    Serial.println("[OTA] Starting OTA download...");
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
     esp_https_ota_config_t otaConfig = {};
     otaConfig.http_config = &httpConfig;
-
-    Serial.println("[OTA] Starting OTA download...");
     esp_err_t ret = esp_https_ota(&otaConfig);
+#else
+    esp_err_t ret = esp_https_ota(&httpConfig);
+#endif
     if (ret == ESP_OK) {
         Serial.println("[OTA] OTA succeeded, will reboot");
         otaResult = OTA_RESULT_SUCCESS;
