@@ -41,6 +41,7 @@ private:
         CONNECTING,
         CONNECTED,
         CHECKING,
+        CHECKING_VERSION,
         UPDATING,
         UPDATE_FAILED
     };
@@ -54,7 +55,7 @@ private:
 
     void handleConnecting();
     void handleConnected();
-    bool isNewVersionAvailable();
+    void startVersionCheck();
     bool performUpdate();
 };
 

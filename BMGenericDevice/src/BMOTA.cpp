@@ -23,6 +23,9 @@ enum OtaResult { OTA_RESULT_PENDING, OTA_RESULT_SUCCESS, OTA_RESULT_FAIL };
 static volatile OtaResult otaResult = OTA_RESULT_PENDING;
 static size_t otaBytesReceived = 0;
 
+enum VersionCheckResult { VERSION_CHECK_PENDING, VERSION_CHECK_NEW, VERSION_CHECK_SAME, VERSION_CHECK_FAIL };
+static volatile VersionCheckResult versionCheckResult = VERSION_CHECK_PENDING;
+
 static esp_err_t httpEvent(esp_http_client_event_t* event) {
     switch (event->event_id) {
         case HTTP_EVENT_ERROR:
@@ -186,15 +189,22 @@ void BMOTA::loop() {
             break;
         }
         case CHECKING:
-            Serial.println("[OTA] Starting update check...");
-            if (!isNewVersionAvailable()) {
+            Serial.println("[OTA] Starting version check...");
+            startVersionCheck();
+            state_ = CHECKING_VERSION;
+            break;
+        case CHECKING_VERSION:
+            if (versionCheckResult == VERSION_CHECK_NEW) {
+                if (performUpdate()) {
+                    state_ = UPDATING;
+                    updateStartTime_ = millis();
+                } else {
+                    state_ = UPDATE_FAILED;
+                }
+            } else if (versionCheckResult == VERSION_CHECK_SAME) {
                 state_ = CONNECTED;
-            } else if (performUpdate()) {
-                state_ = UPDATING;
-                updateStartTime_ = millis();
-            } else {
-                Serial.println("[OTA] Update download failed to start");
-                state_ = UPDATE_FAILED;
+            } else if (versionCheckResult == VERSION_CHECK_FAIL) {
+                state_ = CONNECTED;
             }
             break;
         case UPDATING: {
@@ -255,7 +265,7 @@ static esp_err_t versionHttpEvent(esp_http_client_event_t* event) {
     return ESP_OK;
 }
 
-bool BMOTA::isNewVersionAvailable() {
+static void versionCheckTask(void* param) {
     Serial.printf("[OTA] Checking version at: %s\n", OTA_VERSION_URL);
     Serial.printf("[OTA] Current firmware version: %s\n", FIRMWARE_VERSION);
 
@@ -267,7 +277,10 @@ bool BMOTA::isNewVersionAvailable() {
     config.cert_pem = OTA_SERVER_CERT;
     config.event_handler = versionHttpEvent;
     config.buffer_size = 4096;
+    config.buffer_size_tx = 2048;
     config.skip_cert_common_name_check = true;
+    config.max_redirection_count = 5;
+    config.disable_auto_redirect = false;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
     esp_err_t err = esp_http_client_perform(client);
@@ -276,27 +289,28 @@ bool BMOTA::isNewVersionAvailable() {
 
     if (err != ESP_OK || status != 200) {
         Serial.printf("[OTA] Version check failed (err=%s, status=%d)\n", esp_err_to_name(err), status);
-        return false;
+        versionCheckResult = VERSION_CHECK_FAIL;
+        vTaskDelete(NULL);
+        return;
     }
 
-    // Trim whitespace/newlines
     String remoteVersion = String(versionResponseBuf);
     remoteVersion.trim();
-
     Serial.printf("[OTA] Remote version: %s\n", remoteVersion.c_str());
 
-    if (remoteVersion.length() == 0) {
-        Serial.println("[OTA] Empty version response, skipping update");
-        return false;
-    }
-
-    if (remoteVersion == FIRMWARE_VERSION) {
+    if (remoteVersion.length() == 0 || remoteVersion == FIRMWARE_VERSION) {
         Serial.println("[OTA] Already running latest version, no update needed");
-        return false;
+        versionCheckResult = VERSION_CHECK_SAME;
+    } else {
+        Serial.printf("[OTA] New version available: %s -> %s\n", FIRMWARE_VERSION, remoteVersion.c_str());
+        versionCheckResult = VERSION_CHECK_NEW;
     }
+    vTaskDelete(NULL);
+}
 
-    Serial.printf("[OTA] New version available: %s -> %s\n", FIRMWARE_VERSION, remoteVersion.c_str());
-    return true;
+void BMOTA::startVersionCheck() {
+    versionCheckResult = VERSION_CHECK_PENDING;
+    xTaskCreate(versionCheckTask, "ver_check", 8192, NULL, 5, NULL);
 }
 
 bool BMOTA::performUpdate() {
