@@ -241,11 +241,50 @@ When implementing mobile app features:
 
 **All BMDevice-based devices now support these features automatically!**
 
+## OTA Firmware Updates (HTTPS)
+
+BMGenericDevice supports fleet-wide HTTPS OTA updates. All devices on WiFi can update themselves from a shared firmware URL—no physical access required.
+
+### Enabling OTA
+
+1. Edit `include/OTAConfig.h`:
+   - Set `OTA_ENABLED` to `1`
+   - Set `OTA_WIFI_SSID` and `OTA_WIFI_PASSWORD` for your network
+   - Set `OTA_FIRMWARE_URL` to your firmware binary URL (HTTPS)
+
+2. Build and flash once via USB. After that, devices will check for updates automatically.
+
+### Hosting Firmware
+
+**GitHub Releases (recommended):**
+1. Build: `pio run -e esp32`
+2. Upload `.pio/build/esp32/firmware.bin` as a Release asset
+3. Use the asset URL: `https://github.com/user/repo/releases/download/v1.0.0/firmware.bin`
+
+**Other options:** S3, any HTTPS server, or local network HTTP (with custom setup).
+
+### OTA Behavior
+
+- **Boot delay:** 30 seconds (configurable) before first check—lets device stabilize
+- **Check interval:** Every 1 hour (configurable)
+- **Certificate:** Uses Let's Encrypt root by default (validates GitHub, most public HTTPS)
+- **Partition table:** `min_spiffs.csv` (OTA-capable)
+
+### Configuration Reference
+
+| Define | Description | Default |
+|--------|-------------|---------|
+| OTA_ENABLED | Enable OTA (0/1) | 0 |
+| OTA_WIFI_SSID | WiFi network name | (set in config) |
+| OTA_WIFI_PASSWORD | WiFi password | (set in config) |
+| OTA_FIRMWARE_URL | URL to firmware.bin | (set in config) |
+| OTA_CHECK_INTERVAL_MS | Milliseconds between checks | 3600000 (1 hr) |
+| OTA_BOOT_DELAY_MS | Delay before first check | 30000 (30 sec) |
+
 ## Future Enhancements
 
 Planned features for future versions:
 - Web-based configuration interface
-- OTA firmware updates with configuration preservation
 - Additional LED chipset support (APA102, SK6812, etc.)
 - GPIO pin validation and conflict detection
 - Configuration backup/restore via JSON import/export

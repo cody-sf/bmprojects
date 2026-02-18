@@ -145,8 +145,8 @@ bool BMDevice::begin() {
         return false;
     }
     
-    // Set initial brightness (may be overridden by defaults)
-    lightShow_.brightness(deviceState_.brightness * 2.55);
+    // Set initial brightness (may be overridden by defaults). Internal scale is 1-255.
+    lightShow_.brightness(deviceState_.brightness);
     
     // Update light show with initial state
     updateLightShow();
@@ -522,9 +522,9 @@ void BMDevice::sendStatusUpdate() {
     // Start with the basic device state JSON
     StaticJsonDocument<768> doc;
     
-    // Basic device state
+    // Basic device state. Report brightness as 1-100 (percent) for app
     doc["pwr"] = deviceState_.power;
-    doc["bri"] = deviceState_.brightness;
+    doc["bri"] = (deviceState_.brightness * 100) / 255;
     doc["spd"] = deviceState_.speed;
     doc["dir"] = deviceState_.reverseStrip;
     
@@ -575,7 +575,11 @@ void BMDevice::handleBrightnessFeature(const uint8_t* buffer, size_t length) {
     if (length >= 5) {
         int b = 0;
         memcpy(&b, buffer + 1, sizeof(int));
-        setBrightness(b);
+        // App sends 1-100 (percent); scale to internal 1-255 and cap by max brightness
+        DeviceDefaults defaults = defaults_.getCurrentDefaults();
+        int scaledB = (b * 255) / 100;
+        int maxScaled = (defaults.maxBrightness * 255) / 100;
+        setBrightness(min(scaledB, maxScaled));
         Serial.print("[BMDevice] Brightness set to: ");
         Serial.println(deviceState_.brightness);
     }
@@ -789,10 +793,11 @@ bool BMDevice::loadDefaults() {
 }
 
 bool BMDevice::saveCurrentAsDefaults() {
+    DeviceDefaults currentDefaults = defaults_.getCurrentDefaults();
     DeviceDefaults newDefaults;
     
-    // Copy current state to defaults
-    newDefaults.brightness = deviceState_.brightness;
+    // Copy current state to defaults. Internal brightness is 1-255; store as 1-100 for app
+    newDefaults.brightness = constrain((deviceState_.brightness * 100) / 255, 1, currentDefaults.maxBrightness);
     newDefaults.speed = deviceState_.speed;
     newDefaults.palette = deviceState_.currentPalette;
     newDefaults.effect = deviceState_.currentEffect;
@@ -800,7 +805,6 @@ bool BMDevice::saveCurrentAsDefaults() {
     newDefaults.effectColor = deviceState_.effectColor;
     
     // Keep existing identity and behavior settings
-    DeviceDefaults currentDefaults = defaults_.getCurrentDefaults();
     newDefaults.maxBrightness = currentDefaults.maxBrightness;
     newDefaults.owner = currentDefaults.owner;
     newDefaults.deviceName = currentDefaults.deviceName;
@@ -833,8 +837,10 @@ bool BMDevice::resetToFactoryDefaults() {
 void BMDevice::applyDefaults() {
     DeviceDefaults defaults = defaults_.getCurrentDefaults();
     
-    // Apply defaults to current state
-    setBrightness(defaults.brightness);
+    // Apply defaults to current state. Stored brightness/max are 1-100; scale to 1-255 for LED
+    int scaledB = (defaults.brightness * 255) / 100;
+    int maxScaled = (defaults.maxBrightness * 255) / 100;
+    setBrightness(min(scaledB, maxScaled));
     setEffect(defaults.effect);
     setPalette(defaults.palette);
     deviceState_.speed = defaults.speed;
@@ -859,10 +865,11 @@ void BMDevice::applyDefaults() {
 void BMDevice::setMaxBrightness(int maxBrightness) {
     bool success = defaults_.setMaxBrightness(maxBrightness);
     if (success) {
-        // If current brightness exceeds new max, adjust it
+        // App sends 1-100; cap internal brightness (1-255) to new max scaled to 1-255
         DeviceDefaults currentDefaults = defaults_.getCurrentDefaults();
-        if (deviceState_.brightness > currentDefaults.maxBrightness) {
-            setBrightness(currentDefaults.maxBrightness);
+        int maxScaled = (currentDefaults.maxBrightness * 255) / 100;
+        if (deviceState_.brightness > maxScaled) {
+            setBrightness(maxScaled);
         }
         Serial.print("[BMDevice] Max brightness set to: ");
         Serial.println(currentDefaults.maxBrightness);
@@ -1202,9 +1209,9 @@ void BMDevice::sendBasicStatusChunk() {
     // Mark this as basic status chunk
     doc["type"] = "basicStatus";
     
-    // Basic device state (same as original sendStatusUpdate)
+    // Basic device state (same as original sendStatusUpdate). Report brightness as 1-100 for app
     doc["pwr"] = deviceState_.power;
-    doc["bri"] = deviceState_.brightness;
+    doc["bri"] = (deviceState_.brightness * 100) / 255;
     doc["spd"] = deviceState_.speed;
     doc["dir"] = deviceState_.reverseStrip;
     

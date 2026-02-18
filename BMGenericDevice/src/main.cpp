@@ -1,4 +1,9 @@
 #include <BMDevice.h>
+#include "OTAConfig.h"
+#if OTA_ENABLED
+#include "BMOTA.h"
+static BMOTA ota;
+#endif
 
 // Default UUIDs for generic device
 #define SERVICE_UUID "4746abe4-2135-4a84-8f2f-f47f3a73e73b"
@@ -9,7 +14,7 @@
 #ifdef TARGET_ESP32_C6
     // ESP32-C6 configuration (single strip for now)
     #define NUM_STRIPS 1
-    #define LEDS_PER_STRIP 350
+    #define LEDS_PER_STRIP 450
     #define COLOR_ORDER GRB
 
     CRGB leds0[LEDS_PER_STRIP];
@@ -353,6 +358,11 @@ void setup() {
         Serial.println("Failed to initialize BMDevice!");
         while (1);
     }
+
+#if OTA_ENABLED
+    ota.begin();
+    Serial.println("[OTA] Update checks enabled - will check after boot delay");
+#endif
     
 #ifdef TARGET_SLUT
     // Store the target brightness that was loaded from defaults
@@ -405,6 +415,10 @@ void setup() {
 }
 
 void loop() {
+#if OTA_ENABLED
+    ota.loop();
+#endif
+
 #ifdef TARGET_SLUT
     // Handle brightness fade-up to prevent power spikes (SLUT only)
     if (!fadeUpComplete) {
