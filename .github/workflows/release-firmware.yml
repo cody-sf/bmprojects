@@ -56,6 +56,7 @@ jobs:
           cp BMGenericDevice/.pio/build/esp32/firmware.bin release/firmware-esp32.bin
           cp BMGenericDevice/.pio/build/c6/firmware.bin release/firmware-c6.bin
           cp BMGenericDevice/.pio/build/slut/firmware.bin release/firmware-slut.bin
+          echo -n "${{ github.ref_name }}" > release/version.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -68,6 +69,7 @@ jobs:
             release/firmware-esp32.bin
             release/firmware-c6.bin
             release/firmware-slut.bin
+            release/version.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -75,6 +77,6 @@ jobs:
         run: |
           gh release delete latest --cleanup-tag --yes 2>/dev/null || true
           gh release create latest --title "Latest" --notes "Latest firmware (built from ${{ github.ref_name }})" \
-            release/firmware-esp32.bin release/firmware-c6.bin release/firmware-slut.bin
+            release/firmware-esp32.bin release/firmware-c6.bin release/firmware-slut.bin release/version.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

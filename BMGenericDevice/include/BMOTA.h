@@ -32,6 +32,9 @@ public:
     /// Check if WiFi credentials are configured (from Preferences or build config)
     bool hasWifiCredentials() const;
 
+    /// Returns true while firmware is being downloaded/installed
+    bool isUpdating() const { return state_ == UPDATING; }
+
 private:
     enum State {
         IDLE,
@@ -51,6 +54,7 @@ private:
 
     void handleConnecting();
     void handleConnected();
+    bool isNewVersionAvailable();
     bool performUpdate();
 };
 

@@ -28,6 +28,9 @@
 // Format: https://github.com/OWNER/REPO/releases/download/TAG/firmware-TARGET.bin
 #define OTA_FIRMWARE_BASE  "https://github.com/cody-sf/bmprojects/releases/download"
 
+// Version check URL (shared across all targets)
+#define OTA_VERSION_URL    OTA_FIRMWARE_BASE "/latest/version.txt"
+
 // Per-target firmware URLs (each build fetches its own binary)
 #if defined(TARGET_SLUT)
   #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-slut.bin"

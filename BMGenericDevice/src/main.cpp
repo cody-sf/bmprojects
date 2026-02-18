@@ -447,6 +447,29 @@ void setup() {
 void loop() {
 #if OTA_ENABLED
     ota.loop();
+    if (ota.isUpdating()) {
+        fill_solid(leds0, LEDS_PER_STRIP, CRGB::Red);
+#ifdef TARGET_SLUT
+        fill_solid(leds1, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds2, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds3, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds4, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds5, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds6, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds7, LEDS_PER_STRIP, CRGB::Red);
+#elif defined(TARGET_ESP32_C6)
+#else
+        fill_solid(leds1, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds2, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds3, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds4, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds5, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds6, LEDS_PER_STRIP, CRGB::Red);
+        fill_solid(leds7, LEDS_PER_STRIP, CRGB::Red);
+#endif
+        FastLED.show();
+        return;
+    }
 #endif
 
 #ifdef TARGET_SLUT
