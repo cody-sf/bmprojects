@@ -31,6 +31,13 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
+      - name: Set firmware version
+        run: |
+          echo '#ifndef VERSION_H' > BMGenericDevice/include/version.h
+          echo '#define VERSION_H' >> BMGenericDevice/include/version.h
+          echo "#define FIRMWARE_VERSION \"${{ github.ref_name }}\"" >> BMGenericDevice/include/version.h
+          echo '#endif' >> BMGenericDevice/include/version.h
+
       - name: Build esp32
         working-directory: BMGenericDevice
         run: pio run -e esp32

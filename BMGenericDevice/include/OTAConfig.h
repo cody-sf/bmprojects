@@ -26,7 +26,7 @@
 
 // Base URL for GitHub Releases - update with your repo. Tag is appended by release workflow.
 // Format: https://github.com/OWNER/REPO/releases/download/TAG/firmware-TARGET.bin
-#define OTA_FIRMWARE_BASE  "https://github.com/YOUR_USERNAME/YOUR_REPO/releases/download"
+#define OTA_FIRMWARE_BASE  "https://github.com/cody-sf/bmprojects/releases/download"
 
 // Per-target firmware URLs (each build fetches its own binary)
 #if defined(TARGET_SLUT)

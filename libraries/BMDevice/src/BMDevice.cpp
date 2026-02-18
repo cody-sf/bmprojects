@@ -1,4 +1,5 @@
 #include "BMDevice.h"
+#include "version.h"
 
 BMDevice::BMDevice(const char* deviceName, const char* serviceUUID, const char* featuresUUID, const char* statusUUID)
     : bluetoothHandler_(deviceName, serviceUUID, featuresUUID, statusUUID), lightShow_(std::vector<CLEDController*>(), deviceClock_),
@@ -520,7 +521,7 @@ void BMDevice::sendStatusUpdate() {
     DeviceDefaults defaults = defaults_.getCurrentDefaults();
     
     // Start with the basic device state JSON
-    StaticJsonDocument<768> doc;
+    StaticJsonDocument<896> doc;
     
     // Basic device state. Report brightness as 1-100 (percent) for app
     doc["pwr"] = deviceState_.power;
@@ -554,6 +555,7 @@ void BMDevice::sendStatusUpdate() {
     doc["maxBri"] = defaults.maxBrightness;
     doc["owner"] = defaults.owner;
     doc["deviceName"] = defaults.deviceName;
+    doc["fwVer"] = FIRMWARE_VERSION;
     
     String status;
     serializeJson(doc, status);
