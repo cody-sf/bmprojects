@@ -18,7 +18,7 @@ void syncBluetoothSettings();
 void syncQuickStatus();
 void saveSettings();
 void loadSettings();
-void restoreDefaults();
+void restoreDefaults();x
 void checkValveTimer();
 
 static Device boofer;
