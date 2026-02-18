@@ -79,5 +79,6 @@
     "print": "cpp"
   },
   "files.autoSave": "off",
-  "eslint.format.enable": true
+  "eslint.format.enable": true,
+  "cmake.sourceDirectory": "/Users/cody/Desktop/bm24/RNUmbrella/node_modules/react-native-screens/android"
 }

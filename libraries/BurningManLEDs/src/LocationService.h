@@ -1,20 +1,24 @@
 #ifndef LOCATIONSERVICE_H
 #define LOCATIONSERVICE_H
 
+// Only compile GPS functionality if enabled
+#ifndef TARGET_ESP32_C6
 #include <TinyGPS++.h>
+#define LOCATION_SERVICE_ENABLED 1
+#else
+#define LOCATION_SERVICE_ENABLED 0
+#endif
 #include "Position.h"
 
 #define SPEED_HISTORY_SIZE 10
 #define GPS_SAMPLE_INTERVAL 1000
 #define TIMEZONE_OFFSET (7 * 60 * 60) // GMT-7
 
-// Define the pins for the GPS module if it's connected via a serial interface
-// 17, 16 for Vinny/Ashton
-// 16, 17 for everyone eles
 
-#define GPS_RX_PIN 16 // Example pin for GPS RX
-#define GPS_TX_PIN 17 // Example pin for GPS TX
+#define GPS_RX_PIN 21 // Example pin for GPS RX
+#define GPS_TX_PIN 22 // Example pin for GPS TX
 
+#if LOCATION_SERVICE_ENABLED
 class LocationService
 {
 public:
@@ -40,6 +44,12 @@ private:
     size_t speed_history_index_;
     TinyGPSPlus gps;          // TinyGPS++ object for parsing GPS data
     HardwareSerial gpsSerial; // ESP32 hardware serial object for GPS communication
+    
+    // Logging throttling variables
+    Position last_logged_position_;
+    float last_logged_speed_;
+    unsigned long last_gps_log_time_;
 };
+#endif // LOCATION_SERVICE_ENABLED
 
 #endif // LOCATIONSERVICE_H

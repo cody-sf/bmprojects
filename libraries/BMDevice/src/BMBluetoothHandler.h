@@ -39,6 +39,21 @@
 #define BLE_FEATURE_SET_DEVICE_OWNER 0x1F
 #define BLE_FEATURE_SET_AUTO_ON 0x20
 
+// GPS Speed Configuration Features
+#define BLE_FEATURE_SET_GPS_LOW_SPEED 0x21
+#define BLE_FEATURE_SET_GPS_TOP_SPEED 0x22
+#define BLE_FEATURE_SET_GPS_LIGHTSHOW_SPEED_ENABLED 0x23
+#define BLE_FEATURE_SET_SYNC_ENABLED 0x24
+
+// Generic Device Configuration Features  
+#define BLE_FEATURE_SET_OWNER 0x30
+#define BLE_FEATURE_SET_DEVICE_TYPE 0x31
+#define BLE_FEATURE_CONFIGURE_LED_STRIP 0x32
+#define BLE_FEATURE_GET_CONFIGURATION 0x33
+#define BLE_FEATURE_RESET_TO_DEFAULTS 0x34
+#define BLE_FEATURE_SET_WIFI_CREDENTIALS 0x35
+#define BLE_FEATURE_GET_WIFI_STATUS 0x36
+
 class BMBluetoothHandler {
 public:
     BMBluetoothHandler(const char* deviceName, const char* serviceUUID, 
@@ -56,10 +71,17 @@ public:
     // Status updates
     void sendStatusUpdate(const String& status);
     
+    // Device name management
+    void setDeviceName(const char* deviceName);
+    
     // Connection state
     bool isConnected() const { return deviceConnected_; }
     unsigned long getLastSyncTime() const { return lastBluetoothSync_; }
     void updateSyncTime() { lastBluetoothSync_ = millis(); }
+
+    // Advertising control (for ESP-NOW coexistence)
+    void startAdvertising();
+    void stopAdvertising();
     
 private:
     // BLE objects
@@ -75,6 +97,7 @@ private:
     
     // Connection state
     bool deviceConnected_;
+    bool initialized_;
     unsigned long lastBluetoothSync_;
     
     // Callbacks

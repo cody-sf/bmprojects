@@ -1,0 +1,70 @@
+name: Release Firmware
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            BMGenericDevice/.pio
+          key: ${{ runner.os }}-platformio-${{ hashFiles('BMGenericDevice/platformio.ini', 'BMGenericDevice/src/**', 'libraries/BMDevice/**') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build esp32
+        working-directory: BMGenericDevice
+        run: pio run -e esp32
+
+      - name: Build c6
+        working-directory: BMGenericDevice
+        run: pio run -e c6
+
+      - name: Build slut
+        working-directory: BMGenericDevice
+        run: pio run -e slut
+
+      - name: Prepare release artifacts
+        run: |
+          mkdir -p release
+          cp BMGenericDevice/.pio/build/esp32/firmware.bin release/firmware-esp32.bin
+          cp BMGenericDevice/.pio/build/c6/firmware.bin release/firmware-c6.bin
+          cp BMGenericDevice/.pio/build/slut/firmware.bin release/firmware-slut.bin
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          generate_release_notes: true
+          files: |
+            release/firmware-esp32.bin
+            release/firmware-c6.bin
+            release/firmware-slut.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update "latest" release
+        run: |
+          gh release delete latest --cleanup-tag --yes 2>/dev/null || true
+          gh release create latest --title "Latest" --notes "Latest firmware (built from ${{ github.ref_name }})" \
+            release/firmware-esp32.bin release/firmware-c6.bin release/firmware-slut.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

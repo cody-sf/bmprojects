@@ -65,15 +65,50 @@ bool BMDeviceDefaults::loadDefaults(DeviceDefaults& defaults) {
     defaults.reverseDirection = preferences_.getBool(PREF_DIRECTION, defaults.reverseDirection);
     defaults.owner = readString(PREF_OWNER, defaults.owner);
     defaults.deviceName = readString(PREF_DEVICE_NAME, defaults.deviceName);
+    defaults.deviceType = readString(PREF_DEVICE_TYPE, defaults.deviceType);
     defaults.autoOn = preferences_.getBool(PREF_AUTO_ON, defaults.autoOn);
+    defaults.activeLEDStrips = preferences_.getInt(PREF_LED_COUNT, defaults.activeLEDStrips);
     defaults.statusUpdateInterval = preferences_.getULong(PREF_STATUS_INTERVAL, defaults.statusUpdateInterval);
     defaults.gpsEnabled = preferences_.getBool(PREF_GPS_ENABLED, defaults.gpsEnabled);
+    
+    // Load GPS speed settings
+    defaults.gpsLowSpeed = preferences_.getFloat(PREF_GPS_LOW_SPEED, defaults.gpsLowSpeed);
+    defaults.gpsTopSpeed = preferences_.getFloat(PREF_GPS_TOP_SPEED, defaults.gpsTopSpeed);
+    defaults.gpsLightshowSpeedEnabled = preferences_.getBool(PREF_GPS_LIGHTSHOW_SPEED_ENABLED, defaults.gpsLightshowSpeedEnabled);
+    
+    // Load sync settings
+    defaults.syncEnabled = preferences_.getBool(PREF_SYNC_ENABLED, defaults.syncEnabled);
+    
     defaults.version = preferences_.getInt(PREF_VERSION, DEFAULTS_VERSION);
     
     // Load effect color
     defaults.effectColor.r = preferences_.getUChar(PREF_EFFECT_COLOR_R, defaults.effectColor.r);
     defaults.effectColor.g = preferences_.getUChar(PREF_EFFECT_COLOR_G, defaults.effectColor.g);
     defaults.effectColor.b = preferences_.getUChar(PREF_EFFECT_COLOR_B, defaults.effectColor.b);
+    
+    // Load LED strip configuration
+    String pinsJson = readString(PREF_LED_PINS, "");
+    String ordersJson = readString(PREF_COLOR_ORDERS, "");
+    
+    if (pinsJson.length() > 0 && ordersJson.length() > 0) {
+        DynamicJsonDocument pinsDoc(1024);
+        DynamicJsonDocument ordersDoc(1024);
+        
+        if (deserializeJson(pinsDoc, pinsJson) == DeserializationError::Ok &&
+            deserializeJson(ordersDoc, ordersJson) == DeserializationError::Ok) {
+            
+            for (int i = 0; i < MAX_LED_STRIPS && i < defaults.activeLEDStrips; i++) {
+                if (i < pinsDoc.size()) {
+                    defaults.ledStrips[i].pin = pinsDoc[i]["pin"];
+                    defaults.ledStrips[i].numLeds = pinsDoc[i]["leds"];
+                    defaults.ledStrips[i].enabled = pinsDoc[i]["enabled"];
+                }
+                if (i < ordersDoc.size()) {
+                    defaults.ledStrips[i].colorOrder = ordersDoc[i];
+                }
+            }
+        }
+    }
     
     // Validate and constrain loaded values
     constrainValues(defaults);
@@ -106,15 +141,43 @@ bool BMDeviceDefaults::saveDefaults(const DeviceDefaults& defaults) {
     success &= preferences_.putBool(PREF_DIRECTION, validatedDefaults.reverseDirection);
     success &= writeString(PREF_OWNER, validatedDefaults.owner);
     success &= writeString(PREF_DEVICE_NAME, validatedDefaults.deviceName);
+    success &= writeString(PREF_DEVICE_TYPE, validatedDefaults.deviceType);
     success &= preferences_.putBool(PREF_AUTO_ON, validatedDefaults.autoOn);
+    success &= preferences_.putInt(PREF_LED_COUNT, validatedDefaults.activeLEDStrips);
     success &= preferences_.putULong(PREF_STATUS_INTERVAL, validatedDefaults.statusUpdateInterval);
     success &= preferences_.putBool(PREF_GPS_ENABLED, validatedDefaults.gpsEnabled);
+    
+    // Save GPS speed settings
+    success &= preferences_.putFloat(PREF_GPS_LOW_SPEED, validatedDefaults.gpsLowSpeed);
+    success &= preferences_.putFloat(PREF_GPS_TOP_SPEED, validatedDefaults.gpsTopSpeed);
+    success &= preferences_.putBool(PREF_GPS_LIGHTSHOW_SPEED_ENABLED, validatedDefaults.gpsLightshowSpeedEnabled);
+    
     success &= preferences_.putInt(PREF_VERSION, validatedDefaults.version);
     
     // Save effect color
     success &= preferences_.putUChar(PREF_EFFECT_COLOR_R, validatedDefaults.effectColor.r);
     success &= preferences_.putUChar(PREF_EFFECT_COLOR_G, validatedDefaults.effectColor.g);
     success &= preferences_.putUChar(PREF_EFFECT_COLOR_B, validatedDefaults.effectColor.b);
+    
+    // Save LED configuration as JSON
+    DynamicJsonDocument pinsDoc(1024);
+    DynamicJsonDocument ordersDoc(1024);
+    
+    for (int i = 0; i < validatedDefaults.activeLEDStrips; i++) {
+        JsonObject pinObj = pinsDoc.createNestedObject();
+        pinObj["pin"] = validatedDefaults.ledStrips[i].pin;
+        pinObj["leds"] = validatedDefaults.ledStrips[i].numLeds;
+        pinObj["enabled"] = validatedDefaults.ledStrips[i].enabled;
+        
+        ordersDoc.add(validatedDefaults.ledStrips[i].colorOrder);
+    }
+    
+    String pinsJson, ordersJson;
+    serializeJson(pinsDoc, pinsJson);
+    serializeJson(ordersDoc, ordersJson);
+    
+    success &= writeString(PREF_LED_PINS, pinsJson);
+    success &= writeString(PREF_COLOR_ORDERS, ordersJson);
     
     if (success) {
         currentDefaults_ = validatedDefaults;
@@ -212,6 +275,81 @@ bool BMDeviceDefaults::setEffectColor(CRGB color) {
 bool BMDeviceDefaults::setGPSEnabled(bool enabled) {
     currentDefaults_.gpsEnabled = enabled;
     return preferences_.putBool(PREF_GPS_ENABLED, enabled);
+}
+
+bool BMDeviceDefaults::setGPSLowSpeed(float speed) {
+    currentDefaults_.gpsLowSpeed = constrain(speed, 0.0f, 100.0f);
+    return preferences_.putFloat(PREF_GPS_LOW_SPEED, currentDefaults_.gpsLowSpeed);
+}
+
+bool BMDeviceDefaults::setGPSTopSpeed(float speed) {
+    currentDefaults_.gpsTopSpeed = constrain(speed, 0.0f, 200.0f);
+    // Ensure top speed is always higher than low speed
+    if (currentDefaults_.gpsTopSpeed <= currentDefaults_.gpsLowSpeed) {
+        currentDefaults_.gpsTopSpeed = currentDefaults_.gpsLowSpeed + 1.0f;
+    }
+    return preferences_.putFloat(PREF_GPS_TOP_SPEED, currentDefaults_.gpsTopSpeed);
+}
+
+bool BMDeviceDefaults::setGPSLightshowSpeedEnabled(bool enabled) {
+    currentDefaults_.gpsLightshowSpeedEnabled = enabled;
+    return preferences_.putBool(PREF_GPS_LIGHTSHOW_SPEED_ENABLED, enabled);
+}
+
+float BMDeviceDefaults::getGPSLowSpeed() {
+    return currentDefaults_.gpsLowSpeed;
+}
+
+float BMDeviceDefaults::getGPSTopSpeed() {
+    return currentDefaults_.gpsTopSpeed;
+}
+
+bool BMDeviceDefaults::isGPSLightshowSpeedEnabled() {
+    return currentDefaults_.gpsLightshowSpeedEnabled;
+}
+
+bool BMDeviceDefaults::setSyncEnabled(bool enabled) {
+    currentDefaults_.syncEnabled = enabled;
+    return preferences_.putBool(PREF_SYNC_ENABLED, enabled);
+}
+
+bool BMDeviceDefaults::isSyncEnabled() {
+    return currentDefaults_.syncEnabled;
+}
+
+bool BMDeviceDefaults::setDeviceType(const String& deviceType) {
+    currentDefaults_.deviceType = deviceType;
+    return writeString(PREF_DEVICE_TYPE, deviceType);
+}
+
+bool BMDeviceDefaults::setLEDStripConfig(int stripIndex, int pin, int numLeds, int colorOrder, bool enabled) {
+    if (stripIndex >= MAX_LED_STRIPS || stripIndex < 0) return false;
+    
+    currentDefaults_.ledStrips[stripIndex].pin = pin;
+    currentDefaults_.ledStrips[stripIndex].numLeds = numLeds;
+    currentDefaults_.ledStrips[stripIndex].colorOrder = colorOrder;
+    currentDefaults_.ledStrips[stripIndex].enabled = enabled;
+    
+    // Save the updated defaults
+    return saveDefaults(currentDefaults_);
+}
+
+bool BMDeviceDefaults::setActiveLEDStrips(int count) {
+    if (count > MAX_LED_STRIPS || count < 0) return false;
+    
+    currentDefaults_.activeLEDStrips = count;
+    return preferences_.putInt(PREF_LED_COUNT, count);
+}
+
+LEDStripConfig BMDeviceDefaults::getLEDStripConfig(int stripIndex) {
+    if (stripIndex >= 0 && stripIndex < MAX_LED_STRIPS) {
+        return currentDefaults_.ledStrips[stripIndex];
+    }
+    return LEDStripConfig(); // Return default config
+}
+
+int BMDeviceDefaults::getActiveLEDStrips() {
+    return currentDefaults_.activeLEDStrips;
 }
 
 DeviceDefaults BMDeviceDefaults::getCurrentDefaults() {
@@ -360,6 +498,15 @@ void BMDeviceDefaults::constrainValues(DeviceDefaults& defaults) {
     // Ensure brightness doesn't exceed max brightness
     if (defaults.brightness > defaults.maxBrightness) {
         defaults.brightness = defaults.maxBrightness;
+    }
+    
+    // Constrain GPS speed values
+    defaults.gpsLowSpeed = constrain(defaults.gpsLowSpeed, 0.0f, 100.0f);
+    defaults.gpsTopSpeed = constrain(defaults.gpsTopSpeed, 0.0f, 200.0f);
+    
+    // Ensure top speed is always higher than low speed
+    if (defaults.gpsTopSpeed <= defaults.gpsLowSpeed) {
+        defaults.gpsTopSpeed = defaults.gpsLowSpeed + 1.0f;
     }
     
     // Constrain string lengths

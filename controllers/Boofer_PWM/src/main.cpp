@@ -6,6 +6,7 @@
 
 // Forward declarations
 void warmupIgnition();
+void handleButtonPress();
 void updateWarmupProcess();
 void handlePressureSensor();
 void blePeripheralConnectHandler(BLEDevice central);
@@ -14,16 +15,17 @@ void sendStatusUpdate();
 void sendConfigStatusUpdate();
 void syncBluetoothStatus();
 void syncBluetoothSettings();
+void syncQuickStatus();
 void saveSettings();
 void loadSettings();
 void restoreDefaults();
-void checkValveSafety();
-void checkReleaseTimer();
+void checkValveTimer();
 
 static Device boofer;
 #define SOLENOID_PIN 18
-#define IGNITION_PIN 25 // The pin connected to TRIG/PWM on the MOSFET module
+#define IGNITION_PIN 25
 #define PRESSURE_PIN 34
+#define BUTTON_PIN 16
 #define SERVICE_UUID "17504d91-b22e-4455-a466-1521d6c4c4af"
 #define COMMAND_UUID "8ce6e2d0-093b-456a-9c39-322b268e1bc0" // Commands TO device
 #define STATUS_UUID "7f3a0b45-8d2c-4789-a1b6-3e4f5c6d7e8f"  // Status FROM device
@@ -37,6 +39,7 @@ bool deviceConnected = false;
 bool oldDeviceConnected = false;
 unsigned long lastStatusSync = 0;
 unsigned long lastConfigSync = 0;
+unsigned long lastQuickStatusSync = 0;
 
 // Variables
 // Factory Defaults
@@ -50,6 +53,21 @@ const int FACTORY_STAGE2_WARMUP = 2000;
 const int FACTORY_STAGE3_START = 226;
 const int FACTORY_STAGE3_END = 240;
 const int FACTORY_STAGE3_WARMUP = 2500;
+
+// Button Variables
+const int SHORT_PRESS_TIME = 100;
+const int OFF_TIME = 1000;
+const int LONG_PRESS_TIME = 10000;  // 10 seconds for ignition toggle
+
+// Button state tracking
+bool buttonPressed = false;
+bool lastButtonState = HIGH;  // Since we're using INPUT_PULLUP, released = HIGH
+unsigned long buttonPressStart = 0;
+bool longPressTriggered = false;
+bool valveOpenedByButton = false;
+bool valveClosedByTimeout = false;
+unsigned long valveTimeoutTime = 0;
+
 // Pressure Sensor Variables
 const float FACTORY_VMin = 0.215;        // Voltage at 0 PSI
 const float FACTORY_VMax = 2.217;        // Voltage at 60 PSI
@@ -96,10 +114,8 @@ bool booferReady = false;
 bool ignitionPower = false;
 bool valveOpen = false;
 unsigned long valveOpenTime = 0;
-int valveTimeout = 5000; // Default 5 seconds
-bool releaseActive = false;
-unsigned long releaseStartTime = 0;
-int releaseDuration = 0;
+int valveTimeout = 5000; // Default 5 seconds - used for timed releases and safety
+int valveActiveDuration = 0; // 0 = indefinite (button hold), >0 = timed release
 
 void featureCallback(BLEDevice central, BLECharacteristic characteristic)
 {
@@ -150,19 +166,21 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       Serial.print("Short Boof: ");
       Serial.println(shortBurst);
       digitalWrite(SOLENOID_PIN, HIGH);
-      delay(shortBurst);
-      digitalWrite(SOLENOID_PIN, LOW);
+      valveOpen = true;
+      valveOpenTime = millis();
+      valveActiveDuration = shortBurst;
       break;
 
     case 0x03: // Long Boof
       Serial.print("Long Boof: ");
       Serial.println(longBurst);
       digitalWrite(SOLENOID_PIN, HIGH);
-      delay(longBurst);
-      digitalWrite(SOLENOID_PIN, LOW);
+      valveOpen = true;
+      valveOpenTime = millis();
+      valveActiveDuration = longBurst;
       break;
 
-    case 0x04: // Short Boof Duration
+    case 0x35: // Short Boof Duration
     {
       int d = 0;
       memcpy(&d, value.data() + 1, sizeof(int));
@@ -172,7 +190,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x05: // Long Boof Duration
+    case 0x36: // Long Boof Duration
     {
       int l = 0;
       memcpy(&l, value.data() + 1, sizeof(int));
@@ -182,7 +200,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x07: // stage1Start
+    case 0x37: // stage1Start
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -192,7 +210,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x08: // stage1End
+    case 0x42: // stage1End
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -203,7 +221,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x09: // stage1Interval
+    case 0x38: // stage1Interval
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -213,7 +231,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0A: // stage2End
+    case 0x39: // stage2End
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -224,7 +242,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0B: // stage2Interval
+    case 0x3A: // stage2Interval
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -234,7 +252,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0C: // stage3End
+    case 0x3B: // stage3End
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -244,7 +262,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0D: // stage3Interval
+    case 0x3C: // stage3Interval
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -254,7 +272,7 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0E: // stageDelay
+    case 0x3D: // stageDelay
     {
       int v = 0;
       memcpy(&v, value.data() + 1, sizeof(int));
@@ -264,19 +282,19 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
     }
     break;
 
-    case 0x0F: // Save Settings
+    case 0x1C: // Save Settings
       Serial.println("Save Settings Command");
       saveSettings();
       break;
 
-    case 0x10: // Restore Defaults
+    case 0x34: // Restore Defaults
     {
       Serial.println("Restore Defaults Command");
       restoreDefaults();
     }
     break;
 
-    case 0x11: // handle release
+    case 0x3E: // handle release
     {
       if (dataLength >= 5)
       { // Need at least 1 byte for command + 4 bytes for int
@@ -288,9 +306,9 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
 
         // Start non-blocking release (prevents BLE corruption)
         digitalWrite(SOLENOID_PIN, HIGH);
-        releaseActive = true;
-        releaseStartTime = millis();
-        releaseDuration = release;
+        valveOpen = true;
+        valveOpenTime = millis();
+        valveActiveDuration = release;
       }
       else
       {
@@ -300,28 +318,30 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       break;
     }
 
-    case 0x12: // Open Valve
+    case 0x3F: // Open Valve
     {
       Serial.println("Opening valve");
       digitalWrite(SOLENOID_PIN, HIGH);
       valveOpen = true;
       valveOpenTime = millis();
+      valveActiveDuration = valveTimeout; // Use safety timeout for manual open
       Serial.print("Valve opened. Timeout in ");
       Serial.print(valveTimeout);
       Serial.println(" ms");
       break;
     }
 
-    case 0x13: // Close Valve
+    case 0x40: // Close Valve
     {
       Serial.println("Closing valve");
       digitalWrite(SOLENOID_PIN, LOW);
       valveOpen = false;
       valveOpenTime = 0;
+      valveActiveDuration = 0;
       break;
     }
 
-    case 0x14: // Set Valve Timeout
+    case 0x41: // Set Valve Timeout
     {
       int timeout = 0;
       memcpy(&timeout, value.data() + 1, sizeof(int));
@@ -329,6 +349,11 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
       Serial.print("Valve timeout set to: ");
       Serial.print(valveTimeout);
       Serial.println(" ms");
+      break;
+    }
+    case 0x30: // set_owner
+    {
+      Serial.println("Setting owner");
       break;
     }
 
@@ -370,6 +395,7 @@ void setup()
 
   pinMode(IGNITION_PIN, OUTPUT);
   pinMode(SOLENOID_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   digitalWrite(IGNITION_PIN, LOW);
   digitalWrite(SOLENOID_PIN, LOW);
@@ -381,8 +407,8 @@ void setup()
 void loop()
 {
   BLE.poll();
-  checkValveSafety();
-  checkReleaseTimer();
+  handleButtonPress();
+  checkValveTimer();
   updateWarmupProcess();
   handlePressureSensor();
   if (ignitionPower)
@@ -398,10 +424,159 @@ void loop()
     // Reset warmup state when turned off
     warmupState = WARMUP_IDLE;
   }
+  syncQuickStatus();
   syncBluetoothStatus();
   syncBluetoothSettings();
 }
 
+void handleButtonPress()
+{
+  bool currentButtonState = digitalRead(BUTTON_PIN);
+  unsigned long currentTime = millis();
+  
+  // Detect button press (transition from HIGH to LOW)
+  if (lastButtonState == HIGH && currentButtonState == LOW)
+  {
+    buttonPressed = true;
+    buttonPressStart = currentTime;
+    longPressTriggered = false;
+    valveOpenedByButton = false;
+    Serial.println("Button press detected");
+    
+    // If ignition is on and ready, open valve immediately
+    if (ignitionPower && booferReady)
+    {
+      Serial.println("Ignition ready - Opening valve for button hold");
+      digitalWrite(SOLENOID_PIN, HIGH);
+      valveOpen = true;
+      valveOpenTime = millis();
+      valveActiveDuration = 0; // Indefinite - controlled by button release
+      valveOpenedByButton = true;
+    }
+    else if (!ignitionPower)
+    {
+      Serial.println("Ignition off - Button press ignored");
+    }
+    else if (ignitionPower && !booferReady)
+    {
+      Serial.println("Ignition warming up - Button press ignored");
+    }
+  }
+  
+  // Handle button being held down
+  if (buttonPressed && currentButtonState == LOW)
+  {
+    unsigned long pressDuration = currentTime - buttonPressStart;
+    
+    // Keep valve open while button is held (if ignition is ready)
+    if (ignitionPower && booferReady && !valveOpenedByButton)
+    {
+      Serial.println("Ignition became ready - Opening valve");
+      digitalWrite(SOLENOID_PIN, HIGH);
+      valveOpen = true;
+      valveOpenTime = millis();
+      valveActiveDuration = 0; // Indefinite - controlled by button release
+      valveOpenedByButton = true;
+    }
+    else if ((!ignitionPower || !booferReady) && valveOpenedByButton)
+    {
+      Serial.println("Ignition no longer ready - Closing valve");
+      digitalWrite(SOLENOID_PIN, LOW);
+      valveOpen = false;
+      valveOpenTime = 0;
+      valveActiveDuration = 0;
+      valveOpenedByButton = false;
+    }
+    
+    // Check for long press (10 seconds) - toggle ignition
+    if (pressDuration >= LONG_PRESS_TIME && !longPressTriggered)
+    {
+      longPressTriggered = true;
+      Serial.println("Long press detected (10s) - Toggling ignition");
+      
+      // Close valve if it was opened by button before toggling ignition
+      if (valveOpenedByButton)
+      {
+        Serial.println("Closing valve before ignition toggle");
+        digitalWrite(SOLENOID_PIN, LOW);
+        valveOpen = false;
+        valveOpenTime = 0;
+        valveActiveDuration = 0;
+        valveOpenedByButton = false;
+      }
+      
+      // Toggle ignition like bluetooth command
+      ignitionPower = !ignitionPower;
+      
+      if (ignitionPower && !booferReady)
+      {
+        Serial.println("Starting warmup from button press");
+        warmupIgnition();
+      }
+      else if (!ignitionPower)
+      {
+        Serial.println("Turning off ignition from button press");
+        // The main loop will handle turning off ignition and resetting warmup
+      }
+    }
+  }
+  
+  // Detect button release (transition from LOW to HIGH)
+  if (lastButtonState == LOW && currentButtonState == HIGH)
+  {
+    Serial.println("Button released");
+    
+    // Close valve if it was opened by button
+    if (valveOpenedByButton)
+    {
+      Serial.println("Closing valve on button release");
+      digitalWrite(SOLENOID_PIN, LOW);
+      valveOpen = false;
+      valveOpenTime = 0;
+      valveActiveDuration = 0;
+      valveOpenedByButton = false;
+    }
+    
+    // Reset timeout tracking when button is released
+    if (valveClosedByTimeout)
+    {
+      Serial.println("Button released - Canceling ignition shutoff timer");
+      valveClosedByTimeout = false;
+      valveTimeoutTime = 0;
+    }
+    
+    // Handle quick tap (short press) - only if ignition didn't toggle
+    if (buttonPressed && !longPressTriggered)
+    {
+      unsigned long pressDuration = currentTime - buttonPressStart;
+      
+      if (pressDuration >= SHORT_PRESS_TIME && pressDuration < LONG_PRESS_TIME)
+      {
+        Serial.println("Quick tap detected");
+        
+                 if (ignitionPower && booferReady)
+         {
+           // Ignition is ready - trigger short valve release
+           Serial.println("Quick tap - Triggering short burst");
+           digitalWrite(SOLENOID_PIN, HIGH);
+           valveOpen = true;
+           valveOpenTime = currentTime;
+           valveActiveDuration = shortBurst;
+         }
+        else
+        {
+          Serial.println("Ignition not ready - Quick tap ignored");
+        }
+      }
+    }
+    
+    // Reset button state
+    buttonPressed = false;
+    longPressTriggered = false;
+  }
+  
+  lastButtonState = currentButtonState;
+}
 // Start non-blocking warmup process
 void warmupIgnition()
 {
@@ -418,7 +593,7 @@ void handlePressureSensor()
   int sensorValue = analogRead(PRESSURE_PIN);
   currentVoltage = (sensorValue / float(adcResolution)) * 3.3;
   pressure = ((currentVoltage - VoutMin) / (VoutMax - VoutMin)) * pressureMax;
-  pressure = max(0.0f, pressure);
+  pressure = max(0.0f, pressure); 
 }
 
 // BLE helpers
@@ -442,7 +617,7 @@ void sendStatusUpdate()
 {
   StaticJsonDocument<512> doc;
   // Add all the settings and their values
-  doc["power"] = ignitionPower;
+  doc["ignPwr"] = ignitionPower;
   doc["pLev"] = currentIgnitionPower;
   doc["ready"] = booferReady;
   doc["vol"] = currentVoltage;
@@ -485,9 +660,23 @@ void sendConfigStatusUpdate()
   statusCharacteristic.setValue(output.c_str());
 }
 
+void sendQuickStatusUpdate()
+{
+  StaticJsonDocument<128> doc;
+  doc["ignPwr"] = ignitionPower;
+  doc["pLev"] = currentIgnitionPower;
+  doc["ready"] = booferReady;
+  doc["pres"] = pressure;
+  doc["valveOpen"] = valveOpen;
+  String output;
+  serializeJson(doc, output);
+  Serial.print("Sending quick status: ");
+  Serial.println(output.c_str());
+  statusCharacteristic.setValue(output.c_str());
+}
 void syncBluetoothStatus()
 {
-  if ((millis() - lastStatusSync) > 500 && deviceConnected)
+  if ((millis() - lastStatusSync) > 10000 && deviceConnected)
   {
     sendStatusUpdate();
     lastStatusSync = millis();
@@ -496,12 +685,22 @@ void syncBluetoothStatus()
 
 void syncBluetoothSettings()
 {
-  if ((millis() - lastConfigSync) > 5000 && deviceConnected)
+  if ((millis() - lastConfigSync) > 10000 && deviceConnected)
   {
     sendConfigStatusUpdate();
     lastConfigSync = millis();
   }
 }
+
+void syncQuickStatus()
+{
+  if ((millis() - lastQuickStatusSync) > 2000 && deviceConnected)
+  {
+    sendQuickStatusUpdate();
+    lastQuickStatusSync = millis();
+  }
+}
+
 
 // Preference Helpers
 void restoreDefaults()
@@ -578,26 +777,58 @@ void loadSettings()
   Serial.println("Settings loaded!");
 }
 
-void checkValveSafety()
+void checkValveTimer()
 {
-  if (valveOpen && (millis() - valveOpenTime > valveTimeout))
-  {
-    Serial.println("Valve timeout! Closing valve.");
-    digitalWrite(SOLENOID_PIN, LOW);
-    valveOpen = false;
-    valveOpenTime = 0;
-  }
-}
-
-void checkReleaseTimer()
-{
-  if (releaseActive)
+  if (valveOpen)
   {
     unsigned long currentTime = millis();
-    if (currentTime - releaseStartTime >= releaseDuration)
+    unsigned long valveOpenDuration = currentTime - valveOpenTime;
+    
+    // Check if valve should close due to its specific duration
+    bool shouldClose = false;
+    if (valveActiveDuration > 0 && valveOpenDuration >= valveActiveDuration)
     {
-      releaseActive = false;
+      Serial.println("Valve timer complete - Closing valve");
+      shouldClose = true;
+    }
+    // Always apply safety limit
+    else if (valveOpenDuration >= valveTimeout)
+    {
+      Serial.print("Valve safety timeout (");
+      Serial.print(valveTimeout);
+      Serial.println("ms) - Closing valve");
+      shouldClose = true;
+      
+      // If this was a button hold, start ignition shutoff timer
+      if (valveOpenedByButton && buttonPressed)
+      {
+        Serial.println("Button still held after valve timeout - Starting ignition shutoff timer");
+        valveClosedByTimeout = true;
+        valveTimeoutTime = currentTime;
+      }
+    }
+    
+    if (shouldClose)
+    {
       digitalWrite(SOLENOID_PIN, LOW);
+      valveOpen = false;
+      valveOpenTime = 0;
+      valveActiveDuration = 0;
+    }
+  }
+  
+  // Check for ignition shutoff after valve timeout (button holds only)
+  if (valveClosedByTimeout && buttonPressed)
+  {
+    unsigned long currentTime = millis();
+    if (currentTime - valveTimeoutTime >= valveTimeout) // Another timeout period
+    {
+      Serial.print("Button held ");
+      Serial.print(valveTimeout);
+      Serial.println("ms after valve timeout - Turning off ignition");
+      ignitionPower = false;
+      valveClosedByTimeout = false;
+      valveTimeoutTime = 0;
     }
   }
 }
