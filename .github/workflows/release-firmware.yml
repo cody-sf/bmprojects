@@ -50,12 +50,22 @@ jobs:
         working-directory: BMGenericDevice
         run: pio run -e slut
 
+      - name: Build hotel_sign
+        working-directory: BMGenericDevice
+        run: pio run -e hotel_sign
+
+      - name: Build takoyaki_sign
+        working-directory: BMGenericDevice
+        run: pio run -e takoyaki_sign
+
       - name: Prepare release artifacts
         run: |
           mkdir -p release
           cp BMGenericDevice/.pio/build/esp32/firmware.bin release/firmware-esp32.bin
           cp BMGenericDevice/.pio/build/c6/firmware.bin release/firmware-c6.bin
           cp BMGenericDevice/.pio/build/slut/firmware.bin release/firmware-slut.bin
+          cp BMGenericDevice/.pio/build/hotel_sign/firmware.bin release/firmware-hotel_sign.bin
+          cp BMGenericDevice/.pio/build/takoyaki_sign/firmware.bin release/firmware-takoyaki_sign.bin
           echo -n "${{ github.ref_name }}" > release/version.txt
 
       - name: Create Release
@@ -69,6 +79,8 @@ jobs:
             release/firmware-esp32.bin
             release/firmware-c6.bin
             release/firmware-slut.bin
+            release/firmware-hotel_sign.bin
+            release/firmware-takoyaki_sign.bin
             release/version.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -77,6 +89,7 @@ jobs:
         run: |
           gh release delete latest --cleanup-tag --yes 2>/dev/null || true
           gh release create latest --title "Latest" --notes "Latest firmware (built from ${{ github.ref_name }})" \
-            release/firmware-esp32.bin release/firmware-c6.bin release/firmware-slut.bin release/version.txt
+            release/firmware-esp32.bin release/firmware-c6.bin release/firmware-slut.bin \
+            release/firmware-hotel_sign.bin release/firmware-takoyaki_sign.bin release/version.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

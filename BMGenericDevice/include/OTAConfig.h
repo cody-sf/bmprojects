@@ -19,29 +19,61 @@
 
 #if OTA_ENABLED
 
-// WiFi credentials - set via BLE from RNUmbrella app (preferred) or fallback to these
-// When empty strings, device uses credentials from app only
-#define OTA_WIFI_SSID     ""
-#define OTA_WIFI_PASSWORD ""
+// Build-time WiFi credentials - a fallback so a freshly flashed board can reach
+// the network without being provisioned in the app first. The app (BLE) still
+// overrides these. Real credentials live in a gitignored WiFiCreds.h so they
+// never get committed or baked into public GitHub-release binaries (CI has no
+// WiFiCreds.h, so released firmware falls back to empty and app-only).
+//
+// To use: copy WiFiCreds.h.example to WiFiCreds.h and fill in your network.
+#if defined(__has_include)
+#  if __has_include("WiFiCreds.h")
+#    include "WiFiCreds.h"
+#  endif
+#endif
+#ifndef WIFI_CREDS_SSID
+#  define WIFI_CREDS_SSID ""
+#  define WIFI_CREDS_PASS ""
+#endif
+#define OTA_WIFI_SSID     WIFI_CREDS_SSID
+#define OTA_WIFI_PASSWORD WIFI_CREDS_PASS
 
 // Base URL for GitHub Releases - update with your repo. Tag is appended by release workflow.
 // Format: https://github.com/OWNER/REPO/releases/download/TAG/firmware-TARGET.bin
+// Note: this is the cody-sf/bmprojects repo, not the `origin` remote of this
+// working copy - the local remote still shows the pre-rename username.
 #define OTA_FIRMWARE_BASE  "https://github.com/cody-sf/bmprojects/releases/download"
 
 // Version check URL (shared across all targets)
 #define OTA_VERSION_URL    OTA_FIRMWARE_BASE "/latest/version.txt"
 
-// Per-target firmware URLs (each build fetches its own binary)
+// Per-target firmware URLs (each build fetches its own binary). The filenames
+// must match the artifacts the release workflow uploads (firmware-<env>.bin),
+// or a device will pull the wrong build - e.g. the hotel sign landing on the
+// generic esp32 image would lose its neon driver and pin map.
 #if defined(TARGET_SLUT)
   #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-slut.bin"
 #elif defined(TARGET_ESP32_C6)
   #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-c6.bin"
+#elif defined(TARGET_HOTEL_SIGN)
+  #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-hotel_sign.bin"
+#elif defined(TARGET_TAKOYAKI_SIGN)
+  #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-takoyaki_sign.bin"
 #else
   #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-esp32.bin"
 #endif
 
 // How often to check for updates (ms). 0 = check once at boot, then every 24h
 #define OTA_CHECK_INTERVAL_MS  (60 * 60 * 1000)  // 1 hour
+
+// ── Local network flashing (ArduinoOTA / espota) ─────────────────────────────
+// Independent of the GitHub pull above: push a locally-built image over WiFi
+// straight from your laptop, no release and no USB cable. The device advertises
+// an espota listener on port 3232 once it is on WiFi; upload with the *_ota
+// PlatformIO envs (see platformio.ini). Set a password so only you can reflash
+// it - pass it to the uploader with `--auth`.
+#define LOCAL_OTA_ENABLED   1
+#define LOCAL_OTA_PASSWORD  "cody"   // the *_ota envs pass this with --auth automatically
 
 // Delay before first OTA check (ms) - allows device to stabilize
 #define OTA_BOOT_DELAY_MS  30000  // 30 seconds

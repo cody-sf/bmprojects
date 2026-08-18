@@ -9,6 +9,9 @@
 #include "BMOTA.h"
 #include "version.h"
 #include <WiFi.h>
+#if LOCAL_OTA_ENABLED
+#include <ArduinoOTA.h>
+#endif
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <esp_https_ota.h>
@@ -164,21 +167,64 @@ void BMOTA::setWifiCredentials(const char* ssid, const char* password) {
     prefs.putString(OTA_PREF_PASS, password);
     prefs.end();
     Serial.printf("[OTA] WiFi credentials saved (SSID: %s)\n", ssid);
+
+    // Apply immediately so a just-provisioned device can update without a
+    // reboot. If it is mid-check/mid-update, leave it be - the new creds are
+    // saved and take effect on the next connect.
+    if (state_ == IDLE || state_ == CONNECTING) {
+        WiFi.disconnect();
+        connectWifi();
+    }
+}
+
+void BMOTA::checkNow() {
+    Serial.println("[OTA] Manual update check requested");
+    forceCheckPending_ = true;
+    bootDelayComplete_ = true;  // a user-initiated check should not wait out the boot delay
+
+    if (state_ == IDLE) {
+        if (!connectWifi()) {
+            Serial.println("[OTA] Cannot check - no WiFi credentials");
+            forceCheckPending_ = false;
+        }
+    }
+    // If CONNECTED, loop() picks up forceCheckPending_ on the next pass; if
+    // CONNECTING it checks as soon as the link is up; if already CHECKING/
+    // UPDATING there is nothing to do.
 }
 
 String BMOTA::getWifiStatusJson() const {
     Preferences prefs;
     StaticJsonDocument<256> doc;
-    if (!prefs.begin(OTA_PREFS_NAMESPACE, true)) {
-        doc["wifiConfigured"] = false;
-        doc["wifiSsid"] = "";
-    } else {
-        String ssid = prefs.getString(OTA_PREF_SSID, "");
+
+    String ssid = "";
+    if (prefs.begin(OTA_PREFS_NAMESPACE, true)) {
+        ssid = prefs.getString(OTA_PREF_SSID, "");
         prefs.end();
-        bool configured = (ssid.length() > 0);
-        doc["wifiConfigured"] = configured;
-        doc["wifiSsid"] = ssid;
     }
+    if (ssid.length() == 0 && strlen(OTA_WIFI_SSID) > 0) {
+        ssid = OTA_WIFI_SSID;
+    }
+
+    bool connected = (WiFi.status() == WL_CONNECTED);
+    doc["wifiConfigured"] = (ssid.length() > 0);
+    doc["wifiSsid"] = ssid;
+    doc["wifiConnected"] = connected;
+    doc["wifiIp"] = connected ? WiFi.localIP().toString() : String("");
+    doc["fwVer"] = FIRMWARE_VERSION;
+
+    const char* stateName = "idle";
+    switch (state_) {
+        case CONNECTING:        stateName = "connecting"; break;
+        case CONNECTED:         stateName = "online"; break;
+        case CHECKING:
+        case CHECKING_VERSION:  stateName = "checking"; break;
+        case UPDATING:          stateName = "updating"; break;
+        case UPDATE_FAILED:     stateName = "failed"; break;
+        default:                stateName = "idle"; break;
+    }
+    doc["otaState"] = stateName;
+
     String json;
     serializeJson(doc, json);
     return json;
@@ -194,8 +240,7 @@ bool BMOTA::hasWifiCredentials() const {
     return false;
 }
 
-void BMOTA::begin() {
-    Serial.println("[OTA] Initializing OTA subsystem...");
+bool BMOTA::connectWifi() {
     Preferences prefs;
     String ssid, password;
     if (prefs.begin(OTA_PREFS_NAMESPACE, true)) {
@@ -214,25 +259,60 @@ void BMOTA::begin() {
         }
     }
     if (ssid.length() == 0) {
-        Serial.println("[OTA] No WiFi credentials configured - OTA disabled. Set via app.");
+        Serial.println("[OTA] No WiFi credentials configured - OTA idle. Set via app.");
         state_ = IDLE;
-        return;
+        return false;
     }
     Serial.println("[OTA] ---- OTA Configuration ----");
     Serial.printf("[OTA]   Firmware URL: %s\n", OTA_FIRMWARE_URL);
     Serial.printf("[OTA]   WiFi SSID:    %s\n", ssid.c_str());
     Serial.printf("[OTA]   Check interval: %lu ms\n", (unsigned long)OTA_CHECK_INTERVAL_MS);
-    Serial.printf("[OTA]   Boot delay:     %lu ms\n", (unsigned long)OTA_BOOT_DELAY_MS);
     Serial.println("[OTA] ------------------------------");
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), password.c_str());
     Serial.println("[OTA] WiFi connecting...");
     state_ = CONNECTING;
     wifiConnectStart_ = millis();
+    return true;
+}
+
+void BMOTA::begin() {
+    Serial.println("[OTA] Initializing OTA subsystem...");
+    Serial.printf("[OTA]   Boot delay: %lu ms\n", (unsigned long)OTA_BOOT_DELAY_MS);
+    // Start the boot-delay clock regardless of whether WiFi comes up now, so a
+    // later provisioning + auto-check is not gated on it.
     bootCompleteTime_ = millis();
+    connectWifi();
+}
+
+void BMOTA::startLocalOta() {
+#if LOCAL_OTA_ENABLED
+    if (localOtaStarted_) return;
+
+    // A short, per-device mDNS name so several signs on one network do not
+    // clash: bm-<last 4 hex of the MAC>.local, also reachable by IP.
+    uint64_t mac = ESP.getEfuseMac();
+    char host[24];
+    snprintf(host, sizeof(host), "bm-%04x", (uint16_t)(mac & 0xFFFF));
+    ArduinoOTA.setHostname(host);
+    if (strlen(LOCAL_OTA_PASSWORD) > 0) {
+        ArduinoOTA.setPassword(LOCAL_OTA_PASSWORD);
+    }
+    ArduinoOTA.onStart([]() { Serial.println("[OTA] Local network flash starting"); });
+    ArduinoOTA.onEnd([]() { Serial.println("[OTA] Local flash complete, rebooting"); });
+    ArduinoOTA.onError([](ota_error_t err) { Serial.printf("[OTA] Local flash error: %u\n", err); });
+    ArduinoOTA.begin();
+    localOtaStarted_ = true;
+    Serial.printf("[OTA] Local network flashing ready at %s.local (espota, port 3232)\n", host);
+#endif
 }
 
 void BMOTA::loop() {
+#if LOCAL_OTA_ENABLED
+    // Cheap when idle; blocks and reboots only during an actual local push.
+    if (localOtaStarted_) ArduinoOTA.handle();
+#endif
+
     if (state_ == IDLE) return;
 
     // Wait for boot delay before first check
@@ -252,7 +332,8 @@ void BMOTA::loop() {
             unsigned long now = millis();
             bool firstCheck = (lastCheckTime_ == 0);
             bool intervalElapsed = (OTA_CHECK_INTERVAL_MS > 0 && now - lastCheckTime_ >= OTA_CHECK_INTERVAL_MS);
-            if (firstCheck || intervalElapsed) {
+            if (firstCheck || intervalElapsed || forceCheckPending_) {
+                forceCheckPending_ = false;
                 lastCheckTime_ = now;
                 state_ = CHECKING;
             }
@@ -304,6 +385,7 @@ void BMOTA::handleConnecting() {
         Serial.printf("[OTA] IP: %s\n", WiFi.localIP().toString().c_str());
         Serial.printf("[OTA] RSSI: %d dBm\n", WiFi.RSSI());
         state_ = CONNECTED;
+        startLocalOta();  // now that WiFi is up, accept local network pushes too
     } else if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) {
         Serial.printf("[OTA] WiFi connection failed (status: %d)\n", status);
         state_ = IDLE;

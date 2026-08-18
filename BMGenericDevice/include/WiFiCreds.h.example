@@ -1,0 +1,18 @@
+/**
+ * WiFiCreds.h.example - build-time WiFi fallback for OTA.
+ *
+ * Copy this file to WiFiCreds.h (same folder) and fill in your network. That
+ * copy is gitignored, so your real credentials never get committed or baked
+ * into public GitHub-release binaries - it only affects images you build and
+ * flash locally (USB or the *_ota network upload).
+ *
+ * The app's BLE provisioning still overrides these at runtime, so this is just
+ * a convenience so a freshly flashed board joins the network on its own.
+ */
+#ifndef WIFI_CREDS_H
+#define WIFI_CREDS_H
+
+#define WIFI_CREDS_SSID  "YourNetworkName"
+#define WIFI_CREDS_PASS  "YourNetworkPassword"
+
+#endif  // WIFI_CREDS_H

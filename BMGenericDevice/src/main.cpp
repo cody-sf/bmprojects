@@ -5,6 +5,11 @@
 static BMOTA ota;
 #endif
 
+#ifdef TARGET_HOTEL_SIGN
+#include "HotelSign.h"
+static HotelSign hotelSign;
+#endif
+
 // Default UUIDs for generic device
 #define SERVICE_UUID "4746abe4-2135-4a84-8f2f-f47f3a73e73b"
 #define FEATURES_UUID "3927e9db-012b-4db9-8890-984fe28faf83"
@@ -300,114 +305,11 @@ void handleEncoderChange() {
 
 #endif
 
-// ── Hotel sign: neon flicker state machine for pin-25 strip ──────────────────
+// ── Hotel sign: neon flicker driver for pin-25 strip ─────────────────────────
+// The state machine, presets and BLE parameter handling now live in
+// HotelSign.{h,cpp}; main.cpp only owns the controller and hands it the frame.
 #ifdef TARGET_HOTEL_SIGN
-
 CLEDController *neonCtrl = nullptr;
-
-// ~60 fps: the fastest flicker state toggles on a 20 ms half period, so this
-// still resolves every visual event.
-#define NEON_FRAME_INTERVAL_MS 16
-
-enum NeonState { NEON_NORMAL, NEON_STUTTER, NEON_DIM, NEON_DEAD };
-
-struct {
-    NeonState state = NEON_NORMAL;
-    unsigned long stateEndMs = 0;
-    unsigned long nextEventMs = 0;
-    uint32_t stutterHalfPeriodMs = 40;
-    unsigned long lastStutterMs = 0;
-    bool stutterHigh = true;
-} neon;
-
-// Returns true when the strip needs to be re-clocked. Clocking 350 LEDs costs
-// ~10 ms of blocking output, so it runs on a frame budget rather than every
-// loop pass, and stays dark (silent) while the device is powered off.
-bool updateNeonStrip() {
-    static bool blanked = false;
-
-    if (!device.getState().power) {
-        if (blanked) {
-            return false;
-        }
-        fill_solid(leds4, LEDS_PER_STRIP, CRGB::Black);
-        blanked = true;
-        return true;
-    }
-    blanked = false;
-
-    uint8_t ceiling = device.getState().brightness;
-    unsigned long now = millis();
-    uint8_t bright = 0;
-
-    static unsigned long lastNeonFrame = 0;
-    if (now - lastNeonFrame < NEON_FRAME_INTERVAL_MS) {
-        return false;
-    }
-    lastNeonFrame = now;
-
-    switch (neon.state) {
-        case NEON_NORMAL: {
-            uint8_t base = (uint8_t)(ceiling * 0.90f);
-            int8_t noise = (int8_t)(random8() % 25) - 10;
-            bright = (uint8_t)constrain((int)base + noise, 0, (int)ceiling);
-
-            if (now >= neon.nextEventMs) {
-                uint8_t r = random8(100);
-                if (r < 35) {
-                    neon.state = NEON_STUTTER;
-                    neon.stateEndMs = now + random(80, 400);
-                    neon.stutterHalfPeriodMs = random(20, 70);
-                    neon.lastStutterMs = now;
-                    neon.stutterHigh = true;
-                } else if (r < 65) {
-                    neon.state = NEON_DIM;
-                    neon.stateEndMs = now + random(300, 900);
-                } else if (r < 85) {
-                    neon.state = NEON_DEAD;
-                    neon.stateEndMs = now + random(60, 300);
-                }
-                neon.nextEventMs = now + random(300, 2500);
-            }
-            break;
-        }
-        case NEON_STUTTER: {
-            if (now - neon.lastStutterMs >= neon.stutterHalfPeriodMs) {
-                neon.stutterHigh = !neon.stutterHigh;
-                neon.lastStutterMs = now;
-                neon.stutterHalfPeriodMs = random(20, 80);
-            }
-            bright = neon.stutterHigh ? (uint8_t)(ceiling * 0.85f) : (uint8_t)(ceiling * 0.04f);
-            if (now >= neon.stateEndMs) {
-                neon.state = NEON_NORMAL;
-                neon.nextEventMs = now + random(400, 2000);
-            }
-            break;
-        }
-        case NEON_DIM: {
-            uint8_t dimBase = (uint8_t)(ceiling * 0.20f);
-            int8_t noise = (int8_t)(random8() % 10) - 5;
-            bright = (uint8_t)constrain((int)dimBase + noise, 3, (int)(ceiling * 0.30f));
-            if (now >= neon.stateEndMs) {
-                neon.state = NEON_NORMAL;
-                neon.nextEventMs = now + random(400, 2000);
-            }
-            break;
-        }
-        case NEON_DEAD: {
-            bright = max(2, (int)(ceiling * 0.04f));
-            if (now >= neon.stateEndMs) {
-                neon.state = NEON_NORMAL;
-                neon.nextEventMs = now + random(600, 3000);
-            }
-            break;
-        }
-    }
-
-    fill_solid(leds4, LEDS_PER_STRIP, CRGB(bright, 0, 0));
-    return true;
-}
-
 #endif
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -448,7 +350,8 @@ void setup() {
     neonCtrl = &FastLED.addLeds<WS2812B, 25, RGB>(leds4, LEDS_PER_STRIP);
     device.addLEDStrip<WS2812B, 33, RGB>(leds5, LEDS_PER_STRIP);  // 12v 2
     device.addLEDStrip<WS2812B, 32, RGB>(leds6, LEDS_PER_STRIP);  // 12v 3
-    Serial.println("  Pin 25 (leds4): neon hotel sign flicker, red only");
+    hotelSign.begin(leds4, LEDS_PER_STRIP);
+    Serial.println("  Pin 25 (leds4): neon hotel sign flicker, adjustable");
 
 #elif TARGET_TAKOYAKI_SIGN
     // Takoyaki sign: same pinout as classic ESP32 with per-strip color order
@@ -532,6 +435,12 @@ void setup() {
     static char pendingSsid[33] = {0};
 
     device.setCustomFeatureHandler([&](uint8_t feature, const uint8_t* data, size_t length) {
+#ifdef TARGET_HOTEL_SIGN
+        if (hotelSign.handleFeature(feature, data, length)) {
+            device.markStatusDirty();  // reflect the new sign settings back to the app
+            return true;
+        }
+#endif
         if (feature == BLE_FEATURE_SET_WIFI_SSID && length >= 2) {
             size_t ssidLen = length - 1;
             if (ssidLen > 32) ssidLen = 32;
@@ -557,12 +466,35 @@ void setup() {
             device.getBluetoothHandler().sendStatusUpdate(ota.getWifiStatusJson());
             return true;
         }
+        if (feature == BLE_FEATURE_OTA_CHECK_NOW) {
+            ota.checkNow();
+            device.getBluetoothHandler().sendStatusUpdate(ota.getWifiStatusJson());
+            return true;
+        }
         return false;
     });
     ota.begin();
     Serial.println("[OTA] Update checks enabled - will check after boot delay");
 #endif
-    
+
+#ifdef TARGET_HOTEL_SIGN
+#if !OTA_ENABLED
+    // No OTA handler to piggy-back on, so the sign owns the custom handler.
+    device.setCustomFeatureHandler([&](uint8_t feature, const uint8_t* data, size_t length) {
+        if (hotelSign.handleFeature(feature, data, length)) {
+            device.markStatusDirty();
+            return true;
+        }
+        return false;
+    });
+#endif
+    // Let the app's sign controls track the hardware: this rides along with the
+    // normal status burst on connect and after every change.
+    device.registerStatusChunk("sign", []() {
+        device.getBluetoothHandler().sendStatusUpdate(hotelSign.statusJson());
+    }, "Hotel sign neon flicker parameters");
+#endif
+
 #if defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
     // Store the target brightness that was loaded from defaults
     targetBrightness = device.getState().brightness;
@@ -671,7 +603,7 @@ void loop() {
     device.loop();
 
 #ifdef TARGET_HOTEL_SIGN
-    if (updateNeonStrip()) {
+    if (hotelSign.update(device.getState().power, device.getState().brightness)) {
         neonCtrl->showLeds(255);  // flush neon data — LightShow only calls per-controller show, never touches leds4
     }
 #endif

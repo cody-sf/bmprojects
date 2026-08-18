@@ -3,3 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Real WiFi credentials for build-time OTA fallback - never commit these.
+# Copy include/WiFiCreds.h.example to include/WiFiCreds.h and fill it in.
+include/WiFiCreds.h

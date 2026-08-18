@@ -54,9 +54,15 @@
 #define BLE_FEATURE_CONFIGURE_LED_STRIP 0x32
 #define BLE_FEATURE_GET_CONFIGURATION 0x33
 #define BLE_FEATURE_RESET_TO_DEFAULTS 0x34
-#define BLE_FEATURE_SET_WIFI_SSID 0x35
-#define BLE_FEATURE_GET_WIFI_STATUS 0x36
-#define BLE_FEATURE_SET_WIFI_PASSWORD 0x37
+// OTA WiFi + update control. These sit at 0x78+ rather than the old 0x35-0x37:
+// the mobile app treats every BMDevice command as "common" and checks that
+// table before a device's own, so a code shared with the boofer/umbrella/
+// stoplight tables (which use 0x35-0x6A) would hijack that device's command.
+// 0x78+ is clear of all of them and of the hotel-sign codes (0x70-0x77).
+#define BLE_FEATURE_SET_WIFI_SSID 0x78
+#define BLE_FEATURE_SET_WIFI_PASSWORD 0x79
+#define BLE_FEATURE_GET_WIFI_STATUS 0x7A
+#define BLE_FEATURE_OTA_CHECK_NOW 0x7B
 // The name a person gives this device. Persisted, reported in status, and
 // folded into the advertised name so both apps can read it without a pairing
 // list of their own.
