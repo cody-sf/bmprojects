@@ -78,7 +78,9 @@ enum AvailablePalettes : uint8_t
     desertstorm,
     cosmicfire,
     alienglow,
-    moltenmetal
+    moltenmetal,
+    purpleorange,
+    orangepurple
 };
 
 // Trivial RGB for union members (CRGB has non-trivial ctor, breaks union default-init on strict compilers)

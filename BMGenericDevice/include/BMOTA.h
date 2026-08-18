@@ -55,8 +55,6 @@ private:
 
     void handleConnecting();
     void handleConnected();
-    void startVersionCheck();
-    bool performUpdate();
 };
 
 #endif  // OTA_ENABLED

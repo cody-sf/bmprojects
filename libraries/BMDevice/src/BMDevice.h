@@ -19,6 +19,18 @@
 #define DEFAULT_BT_REFRESH_INTERVAL 5000
 #define DEFAULT_GPS_BAUD 9600
 
+// Status updates are event-driven, not periodic. A change (BLE write, encoder
+// turn, defaults reload) marks the status dirty; the burst goes out once the
+// device has been quiet for STATUS_SETTLE_MS so that dragging a slider or the
+// startup brightness fade produces one update instead of dozens.
+#define STATUS_SETTLE_MS 350
+// Floor on the gap between two bursts, so a stream of writes can never turn
+// into a stream of 4-chunk notifications.
+#define STATUS_MIN_INTERVAL_MS 1000
+// How often the state fingerprint is recomputed to catch direct writes to
+// getState() (encoder menu, custom device code).
+#define STATUS_FINGERPRINT_POLL_MS 200
+
 // Chunked status update system
 enum StatusUpdateState {
     STATUS_IDLE,
@@ -70,6 +82,8 @@ public:
     BMDeviceDefaults& getDefaults() { return defaults_; }
     
     // Configuration
+    // Legacy: status updates are event-driven now, so this only affects the
+    // "interval" value reported to the app in the device config chunk.
     void setStatusUpdateInterval(unsigned long interval) { statusUpdateInterval_ = interval; }
     void setBrightness(int brightness);
     void setEffect(LightSceneID effect);
@@ -91,7 +105,22 @@ public:
     void registerStatusChunk(const String& type, std::function<void()> sendFunction, const String& description = "");
     void startChunkedStatusUpdate();
     void clearStatusChunks();
-    
+
+    // Event-driven status updates.
+    //
+    // Call markStatusDirty() after changing device settings outside of the
+    // standard BLE feature handlers (encoder menus, custom feature handlers).
+    // Changes made through setBrightness()/setEffect()/setPalette() or written
+    // straight into getState() are picked up automatically by the fingerprint
+    // check, so marking is an optimisation rather than a requirement.
+    void markStatusDirty();
+    // Returns true at most once per pending change, when a status burst is due:
+    // the central is subscribed, the settings have settled, and the minimum gap
+    // since the last burst has elapsed. Devices that drive their own loop (e.g.
+    // BTUmbrellaV3) call this instead of BMDevice::loop().
+    bool takeDueStatusUpdate();
+
+
 private:
     // Core components
     BMDeviceState deviceState_;
@@ -110,7 +139,18 @@ private:
     // Timing
     unsigned long lastBluetoothSync_;
     unsigned long statusUpdateInterval_;
-    
+
+    // Event-driven status update tracking
+    bool statusDirty_;
+    unsigned long statusDirtyAt_;      // when the most recent change landed
+    unsigned long lastStatusSentAt_;
+    unsigned long lastFingerprintAt_;
+    uint32_t stateFingerprint_;
+    bool wasSubscribed_;
+
+    // Power-off LED state, so the strips are cleared once instead of every loop
+    bool ledsBlanked_;
+
     // Custom handlers
     std::function<bool(uint8_t, const uint8_t*, size_t)> customFeatureHandler_;
     std::function<void(bool)> customConnectionHandler_;
@@ -137,6 +177,7 @@ private:
     
     // Chunked status update methods
     void handleChunkedStatusUpdate();
+    uint32_t computeStateFingerprint();
     void sendBasicStatusChunk();
     void sendDeviceConfigChunk();
     void sendDefaultsChunk();

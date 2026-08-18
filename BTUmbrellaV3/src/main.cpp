@@ -557,7 +557,9 @@ void verifyAllSettings() {
 }
 
 // === SOUND FEATURE HANDLER ===
-bool handleSoundFeatures(uint8_t feature, const uint8_t* data, size_t length) {
+// Applies one umbrella-specific command. Returns true when the command was
+// ours; handleSoundFeatures() below turns that into a status push.
+bool applySoundFeature(uint8_t feature, const uint8_t* data, size_t length) {
     Serial.printf("🔧 [SOUND FEATURE] Received: 0x%02X, length: %d\n", feature, length);
     
     // Handle save settings command (use new dedicated command)
@@ -985,18 +987,30 @@ bool handleSoundFeatures(uint8_t feature, const uint8_t* data, size_t length) {
             Serial.printf("❓ Unknown sound feature: 0x%02X\n", feature);
             return false;
     }
-    
+
     Serial.printf("❌ Invalid data length for feature 0x%02X\n", feature);
     return false;
+}
+
+bool handleSoundFeatures(uint8_t feature, const uint8_t* data, size_t length) {
+    bool handled = applySoundFeature(feature, data, length);
+    if (handled) {
+        // A sound setting changed - let the app know. BMDevice coalesces these,
+        // so sweeping a slider still results in a single status burst.
+        device.markStatusDirty();
+    }
+    return handled;
 }
 
 // === CONNECTION HANDLER ===
 void handleConnectionChange(bool connected) {
     Serial.printf("📡 [CONNECTION] %s\n", connected ? "CONNECTED" : "DISCONNECTED");
-    
+
     if (connected) {
         updatePalettesFromBMDevice();
-        sendUmbrellaStatus();
+        // The status burst is not sent here: the app has not subscribed to
+        // notifications yet at this point, so it would be thrown away.
+        // device.takeDueStatusUpdate() fires it on the subscribe edge.
     }
 }
 
@@ -1419,9 +1433,10 @@ void sendBasicStatus() {
     // Create basic status JSON (under 512 bytes)
     StaticJsonDocument<512> doc;
     
-    // Essential device state
+    // Essential device state. Brightness is reported as 1-100 (percent) to match
+    // what the app sends and what BMDevice reports - state.brightness is 1-255.
     doc["pwr"] = state.power;
-    doc["bri"] = state.brightness;
+    doc["bri"] = (state.brightness * 100) / 255;
     doc["spd"] = state.speed;
     doc["dir"] = state.reverseStrip;
     
@@ -1691,15 +1706,13 @@ void loop() {
     // Get current state
     BMDeviceState& state = device.getState();
 
-    // Send periodic status updates
-    static unsigned long lastStatusUpdate = 0;
-    unsigned long statusUpdateInterval = 5000; 
-    
-    if ((millis() - lastStatusUpdate) > statusUpdateInterval && bluetoothHandler.isConnected()) {
-        sendUmbrellaStatus(); 
-        lastStatusUpdate = millis();
+    // Status goes out when the app subscribes, when a setting changes, and when
+    // the app explicitly asks (0x02) - never on a timer.
+    if (device.takeDueStatusUpdate()) {
+        sendUmbrellaStatus();
     }
-    
+
+
     // Debug power state changes
     static bool lastPowerState = true;
     if (state.power != lastPowerState) {
@@ -1720,13 +1733,20 @@ void loop() {
         lastPrimaryPalette = state.currentPalette;
     }
     
-    // Handle power off
+    // Handle power off - blank once instead of re-clocking all 8 strips on
+    // every pass, which otherwise pins the CPU for as long as the device is off
+    static bool ledsBlanked = false;
     if (!state.power) {
-        FastLED.clear();
-        FastLED.show();
+        if (!ledsBlanked) {
+            FastLED.clear();
+            FastLED.show();
+            ledsBlanked = true;
+        }
         return;
     }
-    
+    ledsBlanked = false;
+
+
     // Debug status
     static unsigned long lastDebugPrint = 0;
     if (millis() - lastDebugPrint > 5000) {  // Every 5 seconds

@@ -734,4 +734,19 @@ DEFINE_GRADIENT_PALETTE(molten_metal_palette){
 };
 CRGBPalette16 moltenMetalPalette = molten_metal_palette;
 
+// Simple two-tone palettes for clean, high-contrast looks
+DEFINE_GRADIENT_PALETTE(purple_orange_palette){
+    0, 128, 0, 255,     // Purple
+    127, 255, 120, 0,   // Orange
+    255, 128, 0, 255    // Purple
+};
+CRGBPalette16 purpleOrangePalette = purple_orange_palette;
+
+DEFINE_GRADIENT_PALETTE(orange_purple_palette){
+    0, 255, 120, 0,     // Orange
+    127, 128, 0, 255,   // Purple
+    255, 255, 120, 0    // Orange
+};
+CRGBPalette16 orangePurplePalette = orange_purple_palette;
+
 #endif

@@ -19,7 +19,7 @@ static BMOTA ota;
 
     CRGB leds0[LEDS_PER_STRIP];
 
-#elif TARGET_SLUT
+#elif defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
     #define NUM_STRIPS 8
     #define LEDS_PER_STRIP 350
     #define COLOR_ORDER GRB
@@ -87,6 +87,25 @@ static BMOTA ota;
     unsigned long lastMenuChange = 0;
     const unsigned long MENU_DISPLAY_TIME = 2000; // Show menu selection for 2 seconds
 
+#elif TARGET_TAKOYAKI_SIGN
+    // Takoyaki sign configuration (same pins/count as classic target)
+    #define NUM_STRIPS 8
+    #define LEDS_PER_STRIP 450
+
+    // Strips 1 & 5 & 6 (GPIO 33, 13, 18): RGB on wire — GRB in software gave R/G swap, blue OK
+    #define STRIP0_COLOR_ORDER GRB 
+    #define STRIP1_COLOR_ORDER GRB // Board 2
+    #define STRIP2_COLOR_ORDER RGB // Board 1
+    #define STRIP3_COLOR_ORDER GRB 
+    #define STRIP4_COLOR_ORDER GRB // Board 3
+    #define STRIP5_COLOR_ORDER RGB // Board 4
+    #define STRIP6_COLOR_ORDER RGB // Board 5
+    #define STRIP7_COLOR_ORDER GRB
+    
+    // Individual LED strip arrays for all 8 strips
+    CRGB leds0[LEDS_PER_STRIP], leds1[LEDS_PER_STRIP], leds2[LEDS_PER_STRIP], leds3[LEDS_PER_STRIP];
+    CRGB leds4[LEDS_PER_STRIP], leds5[LEDS_PER_STRIP], leds6[LEDS_PER_STRIP], leds7[LEDS_PER_STRIP];
+
 #else
     // ESP32 classic configuration (8 strips)
     #define NUM_STRIPS 8
@@ -101,8 +120,8 @@ static BMOTA ota;
 // BMDevice instance with dynamic naming
 BMDevice device(SERVICE_UUID, FEATURES_UUID, STATUS_UUID);
 
-#ifdef TARGET_SLUT
-// Fade-up variables to prevent power spikes at startup (SLUT only)
+#if defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
+// Fade-up variables to prevent power spikes at startup
 int targetBrightness = 50;  // Will be set from loaded defaults
 int currentFadeBrightness = 1;  // Start very low
 unsigned long fadeStartTime = 0;
@@ -112,7 +131,7 @@ bool fadeUpComplete = false;
 
 #endif
 
-#ifdef TARGET_SLUT
+#if defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
 // Function to cycle through curated light show effects
 void cycleEffect(int direction) {
     // Curated list of visually distinct effects
@@ -196,8 +215,8 @@ void handleEncoderChange() {
                 brightness = constrain(brightness, 0, 125);
                 device.setBrightness(brightness);
                 
-                // If user manually adjusts brightness, update target and skip fade-up (SLUT only)
-                #ifdef TARGET_SLUT
+                // If user manually adjusts brightness, update target and skip fade-up
+                #if defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
                 if (!fadeUpComplete) {
                     targetBrightness = brightness;
                     fadeUpComplete = true;
@@ -227,7 +246,11 @@ void handleEncoderChange() {
                 cycleEffect(direction);
                 break;
         }
-        
+
+        // Push the new settings to a connected app (coalesced by BMDevice, so
+        // spinning the wheel produces one update once it stops)
+        device.markStatusDirty();
+
         lastMenuChange = millis();
     }
     
@@ -265,6 +288,7 @@ void handleEncoderChange() {
             // Long Press - toggle power
             bool power = device.getState().power;
             device.getState().power = !power;
+            device.markStatusDirty();
             Serial.print("Power: ");
             Serial.println(device.getState().power ? "On" : "Off");
             delay(100);
@@ -275,6 +299,117 @@ void handleEncoderChange() {
 
 
 #endif
+
+// ── Hotel sign: neon flicker state machine for pin-25 strip ──────────────────
+#ifdef TARGET_HOTEL_SIGN
+
+CLEDController *neonCtrl = nullptr;
+
+// ~60 fps: the fastest flicker state toggles on a 20 ms half period, so this
+// still resolves every visual event.
+#define NEON_FRAME_INTERVAL_MS 16
+
+enum NeonState { NEON_NORMAL, NEON_STUTTER, NEON_DIM, NEON_DEAD };
+
+struct {
+    NeonState state = NEON_NORMAL;
+    unsigned long stateEndMs = 0;
+    unsigned long nextEventMs = 0;
+    uint32_t stutterHalfPeriodMs = 40;
+    unsigned long lastStutterMs = 0;
+    bool stutterHigh = true;
+} neon;
+
+// Returns true when the strip needs to be re-clocked. Clocking 350 LEDs costs
+// ~10 ms of blocking output, so it runs on a frame budget rather than every
+// loop pass, and stays dark (silent) while the device is powered off.
+bool updateNeonStrip() {
+    static bool blanked = false;
+
+    if (!device.getState().power) {
+        if (blanked) {
+            return false;
+        }
+        fill_solid(leds4, LEDS_PER_STRIP, CRGB::Black);
+        blanked = true;
+        return true;
+    }
+    blanked = false;
+
+    uint8_t ceiling = device.getState().brightness;
+    unsigned long now = millis();
+    uint8_t bright = 0;
+
+    static unsigned long lastNeonFrame = 0;
+    if (now - lastNeonFrame < NEON_FRAME_INTERVAL_MS) {
+        return false;
+    }
+    lastNeonFrame = now;
+
+    switch (neon.state) {
+        case NEON_NORMAL: {
+            uint8_t base = (uint8_t)(ceiling * 0.90f);
+            int8_t noise = (int8_t)(random8() % 25) - 10;
+            bright = (uint8_t)constrain((int)base + noise, 0, (int)ceiling);
+
+            if (now >= neon.nextEventMs) {
+                uint8_t r = random8(100);
+                if (r < 35) {
+                    neon.state = NEON_STUTTER;
+                    neon.stateEndMs = now + random(80, 400);
+                    neon.stutterHalfPeriodMs = random(20, 70);
+                    neon.lastStutterMs = now;
+                    neon.stutterHigh = true;
+                } else if (r < 65) {
+                    neon.state = NEON_DIM;
+                    neon.stateEndMs = now + random(300, 900);
+                } else if (r < 85) {
+                    neon.state = NEON_DEAD;
+                    neon.stateEndMs = now + random(60, 300);
+                }
+                neon.nextEventMs = now + random(300, 2500);
+            }
+            break;
+        }
+        case NEON_STUTTER: {
+            if (now - neon.lastStutterMs >= neon.stutterHalfPeriodMs) {
+                neon.stutterHigh = !neon.stutterHigh;
+                neon.lastStutterMs = now;
+                neon.stutterHalfPeriodMs = random(20, 80);
+            }
+            bright = neon.stutterHigh ? (uint8_t)(ceiling * 0.85f) : (uint8_t)(ceiling * 0.04f);
+            if (now >= neon.stateEndMs) {
+                neon.state = NEON_NORMAL;
+                neon.nextEventMs = now + random(400, 2000);
+            }
+            break;
+        }
+        case NEON_DIM: {
+            uint8_t dimBase = (uint8_t)(ceiling * 0.20f);
+            int8_t noise = (int8_t)(random8() % 10) - 5;
+            bright = (uint8_t)constrain((int)dimBase + noise, 3, (int)(ceiling * 0.30f));
+            if (now >= neon.stateEndMs) {
+                neon.state = NEON_NORMAL;
+                neon.nextEventMs = now + random(400, 2000);
+            }
+            break;
+        }
+        case NEON_DEAD: {
+            bright = max(2, (int)(ceiling * 0.04f));
+            if (now >= neon.stateEndMs) {
+                neon.state = NEON_NORMAL;
+                neon.nextEventMs = now + random(600, 3000);
+            }
+            break;
+        }
+    }
+
+    fill_solid(leds4, LEDS_PER_STRIP, CRGB(bright, 0, 0));
+    return true;
+}
+
+#endif
+// ─────────────────────────────────────────────────────────────────────────────
 
 void setup() {
     Serial.begin(115200);
@@ -291,16 +426,50 @@ void setup() {
     Serial.println("ESP32-C6 configuration:");
     Serial.println("  Strip 0: GPIO 17, 350 LEDs, GRB color order");
 
-#elif TARGET_SLUT
-    // SLUT: 8 strips on the specified pins
+#elif defined(TARGET_SLUT)
+    // SLUT: 7 strips on the specified pins
     Serial.println("SLUT configuration:");
-    device.addLEDStrip<WS2812B, 5, COLOR_ORDER>(leds0, LEDS_PER_STRIP);  // Strip 0: GPIO 32
-    device.addLEDStrip<WS2812B, 14, COLOR_ORDER>(leds1, LEDS_PER_STRIP);  // Strip 1: GPIO 33
-    device.addLEDStrip<WS2812B, 27, COLOR_ORDER>(leds2, LEDS_PER_STRIP);  // Strip 2: GPIO 27
-    device.addLEDStrip<WS2812B, 26, COLOR_ORDER>(leds3, LEDS_PER_STRIP);  // Strip 3: GPIO 14
-    device.addLEDStrip<WS2812B, 25, RGB>(leds4, LEDS_PER_STRIP);  //12v 1
+    device.addLEDStrip<WS2812B, 5, COLOR_ORDER>(leds0, LEDS_PER_STRIP);
+    device.addLEDStrip<WS2812B, 14, COLOR_ORDER>(leds1, LEDS_PER_STRIP);
+    device.addLEDStrip<WS2812B, 27, COLOR_ORDER>(leds2, LEDS_PER_STRIP);
+    device.addLEDStrip<WS2812B, 26, COLOR_ORDER>(leds3, LEDS_PER_STRIP);
+    device.addLEDStrip<WS2812B, 25, RGB>(leds4, LEDS_PER_STRIP);  // 12v 1
     device.addLEDStrip<WS2812B, 33, RGB>(leds5, LEDS_PER_STRIP);  // 12v 2
     device.addLEDStrip<WS2812B, 32, RGB>(leds6, LEDS_PER_STRIP);  // 12v 3
+
+#elif defined(TARGET_HOTEL_SIGN)
+    // Hotel sign: 6 BLE-controlled strips + pin 25 managed by neon flicker code
+    Serial.println("HOTEL_SIGN configuration:");
+    device.addLEDStrip<WS2812B, 5, COLOR_ORDER>(leds0, LEDS_PER_STRIP);
+    device.addLEDStrip<WS2812B, 14, COLOR_ORDER>(leds1, LEDS_PER_STRIP);
+    device.addLEDStrip<WS2812B, 27, COLOR_ORDER>(leds2, LEDS_PER_STRIP);
+    device.addLEDStrip<WS2812B, 26, COLOR_ORDER>(leds3, LEDS_PER_STRIP);
+    // pin 25 (leds4) registered directly with FastLED — neon flicker, not BMDevice effects
+    neonCtrl = &FastLED.addLeds<WS2812B, 25, RGB>(leds4, LEDS_PER_STRIP);
+    device.addLEDStrip<WS2812B, 33, RGB>(leds5, LEDS_PER_STRIP);  // 12v 2
+    device.addLEDStrip<WS2812B, 32, RGB>(leds6, LEDS_PER_STRIP);  // 12v 3
+    Serial.println("  Pin 25 (leds4): neon hotel sign flicker, red only");
+
+#elif TARGET_TAKOYAKI_SIGN
+    // Takoyaki sign: same pinout as classic ESP32 with per-strip color order
+    device.addLEDStrip<WS2812B, 32, STRIP0_COLOR_ORDER>(leds0, LEDS_PER_STRIP);  // Strip 0: GPIO 32
+    device.addLEDStrip<WS2812B, 33, STRIP1_COLOR_ORDER>(leds1, LEDS_PER_STRIP);  // Strip 1: GPIO 33  // Board 2
+    device.addLEDStrip<WS2812B, 27, STRIP2_COLOR_ORDER>(leds2, LEDS_PER_STRIP);  // Strip 2: GPIO 27  // Board 1
+    device.addLEDStrip<WS2812B, 14, STRIP3_COLOR_ORDER>(leds3, LEDS_PER_STRIP);  // Strip 3: GPIO 1
+    device.addLEDStrip<WS2812B, 12, STRIP4_COLOR_ORDER>(leds4, LEDS_PER_STRIP);  // Strip 4: GPIO 1   // Board 3
+    device.addLEDStrip<WS2812B, 13, STRIP5_COLOR_ORDER>(leds5, LEDS_PER_STRIP);  // Strip 5: GPIO 13  // Board 4
+    device.addLEDStrip<WS2812B, 18, STRIP6_COLOR_ORDER>(leds6, LEDS_PER_STRIP);  // Strip 6: GPIO 18  // Board 5
+    device.addLEDStrip<WS2812B, 5, STRIP7_COLOR_ORDER>(leds7, LEDS_PER_STRIP);   // Strip 7: GPIO 5
+
+    Serial.println("TAKOYAKI_SIGN configuration:");
+    Serial.println("  Strip 0: GPIO 32, 450 LEDs, STRIP0_COLOR_ORDER");
+    Serial.println("  Strip 1: GPIO 33, 450 LEDs, STRIP1_COLOR_ORDER");
+    Serial.println("  Strip 2: GPIO 27, 450 LEDs, STRIP2_COLOR_ORDER");
+    Serial.println("  Strip 3: GPIO 14, 450 LEDs, STRIP3_COLOR_ORDER");
+    Serial.println("  Strip 4: GPIO 12, 450 LEDs, STRIP4_COLOR_ORDER");
+    Serial.println("  Strip 5: GPIO 13, 450 LEDs, STRIP5_COLOR_ORDER");
+    Serial.println("  Strip 6: GPIO 18, 450 LEDs, STRIP6_COLOR_ORDER");
+    Serial.println("  Strip 7: GPIO 5, 450 LEDs, STRIP7_COLOR_ORDER");
     
 #else
     // ESP32 classic: 8 strips on the specified pinspio 
@@ -324,26 +493,26 @@ void setup() {
     Serial.println("  Strip 7: GPIO 5, 450 LEDs, GRB color order");
 #endif
     
-#ifdef TARGET_SLUT
+#if defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
     Serial.println("ENABLE_GPS_ON_UPLOAD is true - enabling GPS...");
     Serial.printf("About to call enableGPS with pins RX:%d TX:%d @ %d baud\n", GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD_RATE);
     device.enableGPS(GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD_RATE);
     Serial.printf("GPS enable call completed - pins RX:%d TX:%d @ %d baud\n", GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD_RATE);
-    
+
     // Initialize encoder pins
     Serial.println("Initializing encoder...");
     pinMode(ENCODER_PIN_A, INPUT_PULLUP);
     pinMode(ENCODER_PIN_B, INPUT_PULLUP);
     pinMode(ENCODER_BUTTON_PIN, INPUT_PULLUP);
-    
+
     // Attach interrupts for encoder
     attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_A), handleEncoder, CHANGE);
     attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_B), handleEncoder, CHANGE);
-    
+
     // Initialize pressedTime and releasedTime to avoid incorrect long press detection
     pressedTime = millis();
     releasedTime = millis();
-    
+
     Serial.printf("Encoder initialized - Pins A:%d B:%d Button:%d\n", ENCODER_PIN_A, ENCODER_PIN_B, ENCODER_BUTTON_PIN);
     Serial.println("Encoder Menu Controls:");
     Serial.println("  Rotate: Adjust current parameter");
@@ -394,22 +563,21 @@ void setup() {
     Serial.println("[OTA] Update checks enabled - will check after boot delay");
 #endif
     
-#ifdef TARGET_SLUT
+#if defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
     // Store the target brightness that was loaded from defaults
     targetBrightness = device.getState().brightness;
-    
+
     // Override with very low brightness to start the fade-up
     device.setBrightness(currentFadeBrightness);
-    
+
     // Start the fade timer
     fadeStartTime = millis();
-    
+
     Serial.print("=== Starting brightness fade-up ===");
     Serial.print("Target brightness: ");
     Serial.print(targetBrightness);
     Serial.print(", Starting from: ");
     Serial.println(currentFadeBrightness);
-    
 
 #endif
     
@@ -422,7 +590,7 @@ void setup() {
     Serial.println("  BLE_FEATURE_GET_CONFIGURATION (0x33) - Get configuration");
     Serial.println("  BLE_FEATURE_RESET_TO_DEFAULTS (0x34) - Reset to defaults");
     
-#ifdef TARGET_SLUT
+#if defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
     Serial.println("");
     Serial.println("GPS Status:");
     Serial.printf("  GPS Enabled: YES (pins RX:%d TX:%d @ %d baud)\n", GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD_RATE);
@@ -449,7 +617,7 @@ void loop() {
     ota.loop();
     if (ota.isUpdating()) {
         fill_solid(leds0, LEDS_PER_STRIP, CRGB::Red);
-#ifdef TARGET_SLUT
+#if defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
         fill_solid(leds1, LEDS_PER_STRIP, CRGB::Red);
         fill_solid(leds2, LEDS_PER_STRIP, CRGB::Red);
         fill_solid(leds3, LEDS_PER_STRIP, CRGB::Red);
@@ -472,8 +640,8 @@ void loop() {
     }
 #endif
 
-#ifdef TARGET_SLUT
-    // Handle brightness fade-up to prevent power spikes (SLUT only)
+#if defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
+    // Handle brightness fade-up to prevent power spikes
     if (!fadeUpComplete) {
         unsigned long elapsed = millis() - fadeStartTime;
         
@@ -501,10 +669,15 @@ void loop() {
 #endif
     
     device.loop();
-    
-#ifdef TARGET_SLUT
-    // Handle encoder input for SLUT target
+
+#ifdef TARGET_HOTEL_SIGN
+    if (updateNeonStrip()) {
+        neonCtrl->showLeds(255);  // flush neon data — LightShow only calls per-controller show, never touches leds4
+    }
+#endif
+
+#if defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
     handleEncoderChange();
-    yield(); // Allow other tasks to run
+    yield();
 #endif
 } 

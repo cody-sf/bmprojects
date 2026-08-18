@@ -5,8 +5,11 @@
 #include <ArduinoBLE.h>
 #include <functional>
 
+#include "BMDeviceLog.h"
+
 // BLE Feature Constants (from your existing code)
 #define BLE_FEATURE_POWER 0x01
+#define BLE_FEATURE_REQUEST_STATUS 0x02
 #define BLE_FEATURE_BRIGHTNESS 0x04
 #define BLE_FEATURE_SPEED 0x05
 #define BLE_FEATURE_DIRECTION 0x06
@@ -55,6 +58,12 @@
 #define BLE_FEATURE_GET_WIFI_STATUS 0x36
 #define BLE_FEATURE_SET_WIFI_PASSWORD 0x37
 
+// How many centrals may be attached at once (phone + watch, plus a spare).
+// Three is the controller's ceiling, not ours: CONFIG_BTDM_CTRL_BLE_MAX_CONN on
+// the classic ESP32, CONFIG_BT_LE_MAX_CONNECTIONS on the C6. ArduinoBLE's ATT
+// layer tracks up to ATT_MAX_PEERS (8), so it is never the binding limit.
+#define BM_MAX_BLE_CENTRALS 3
+
 class BMBluetoothHandler {
 public:
     BMBluetoothHandler(const char* deviceName, const char* serviceUUID, 
@@ -77,6 +86,10 @@ public:
     
     // Connection state
     bool isConnected() const { return deviceConnected_; }
+    uint8_t connectedCentralCount() const { return connectedCount_; }
+    // True once the central has enabled notifications on the status characteristic.
+    // Sending before this point is wasted work - the central never sees it.
+    bool isSubscribed();
     unsigned long getLastSyncTime() const { return lastBluetoothSync_; }
     void updateSyncTime() { lastBluetoothSync_ = millis(); }
 
@@ -98,6 +111,12 @@ private:
     
     // Connection state
     bool deviceConnected_;
+    // ArduinoBLE reports connect/disconnect per link but keeps no peer count, so
+    // track it here: with the phone and the watch both attached, one dropping
+    // must not read as "disconnected" and silence status updates to the other.
+    uint8_t connectedCount_;
+    // Set from a BLE event callback, acted on in poll() - see poll() for why.
+    volatile bool advertisingRestartPending_;
     bool initialized_;
     unsigned long lastBluetoothSync_;
     

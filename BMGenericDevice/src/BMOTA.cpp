@@ -21,10 +21,11 @@ static const char* OTA_PREF_PASS = "pass";
 
 enum OtaResult { OTA_RESULT_PENDING, OTA_RESULT_SUCCESS, OTA_RESULT_FAIL };
 static volatile OtaResult otaResult = OTA_RESULT_PENDING;
-static size_t otaBytesReceived = 0;
 
 enum VersionCheckResult { VERSION_CHECK_PENDING, VERSION_CHECK_NEW, VERSION_CHECK_SAME, VERSION_CHECK_FAIL };
 static volatile VersionCheckResult versionCheckResult = VERSION_CHECK_PENDING;
+
+static size_t otaBytesReceived = 0;
 
 static esp_err_t httpEvent(esp_http_client_event_t* event) {
     switch (event->event_id) {
@@ -55,7 +56,76 @@ static esp_err_t httpEvent(esp_http_client_event_t* event) {
     return ESP_OK;
 }
 
-static void otaTask(void* param) {
+static char versionResponseBuf[64];
+static int versionResponseLen = 0;
+
+static esp_err_t versionHttpEvent(esp_http_client_event_t* event) {
+    if (event->event_id == HTTP_EVENT_ON_DATA) {
+        int copyLen = event->data_len;
+        if (versionResponseLen + copyLen >= (int)sizeof(versionResponseBuf) - 1)
+            copyLen = sizeof(versionResponseBuf) - 1 - versionResponseLen;
+        if (copyLen > 0) {
+            memcpy(versionResponseBuf + versionResponseLen, event->data, copyLen);
+            versionResponseLen += copyLen;
+            versionResponseBuf[versionResponseLen] = '\0';
+        }
+    }
+    return ESP_OK;
+}
+
+static void otaCheckAndUpdateTask(void* param) {
+    // --- Phase 1: Version check ---
+    Serial.printf("[OTA] Checking version at: %s\n", OTA_VERSION_URL);
+    Serial.printf("[OTA] Current firmware version: %s\n", FIRMWARE_VERSION);
+
+    versionResponseLen = 0;
+    versionResponseBuf[0] = '\0';
+
+    {
+        esp_http_client_config_t config = {};
+        config.url = OTA_VERSION_URL;
+        config.cert_pem = OTA_SERVER_CERT;
+        config.event_handler = versionHttpEvent;
+        config.buffer_size = 4096;
+        config.buffer_size_tx = 2048;
+        config.skip_cert_common_name_check = true;
+        config.max_redirection_count = 5;
+
+        esp_http_client_handle_t client = esp_http_client_init(&config);
+        esp_err_t err = esp_http_client_perform(client);
+        int status = esp_http_client_get_status_code(client);
+        esp_http_client_cleanup(client);
+
+        if (err != ESP_OK || status != 200) {
+            Serial.printf("[OTA] Version check failed (err=%s, status=%d)\n", esp_err_to_name(err), status);
+            versionCheckResult = VERSION_CHECK_FAIL;
+            vTaskDelete(NULL);
+            return;
+        }
+    }
+
+    String remoteVersion = String(versionResponseBuf);
+    remoteVersion.trim();
+    Serial.printf("[OTA] Remote version: %s\n", remoteVersion.c_str());
+
+    if (remoteVersion.length() == 0 || remoteVersion == FIRMWARE_VERSION) {
+        Serial.println("[OTA] Already running latest version, no update needed");
+        versionCheckResult = VERSION_CHECK_SAME;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    Serial.printf("[OTA] New version available: %s -> %s\n", FIRMWARE_VERSION, remoteVersion.c_str());
+    versionCheckResult = VERSION_CHECK_NEW;
+
+    // Brief pause to let network stack fully clean up before new connections
+    Serial.println("[OTA] Preparing to download update...");
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
+    // --- Phase 2: OTA download ---
+    Serial.printf("[OTA] Fetching firmware from: %s\n", OTA_FIRMWARE_URL);
+    Serial.printf("[OTA] Free heap: %u bytes\n", ESP.getFreeHeap());
+
     esp_http_client_config_t httpConfig = {};
     httpConfig.url = OTA_FIRMWARE_URL;
     httpConfig.cert_pem = OTA_SERVER_CERT;
@@ -189,22 +259,18 @@ void BMOTA::loop() {
             break;
         }
         case CHECKING:
-            Serial.println("[OTA] Starting version check...");
-            startVersionCheck();
+            Serial.println("[OTA] Starting update check...");
+            versionCheckResult = VERSION_CHECK_PENDING;
+            otaResult = OTA_RESULT_PENDING;
+            updateStartTime_ = millis();
+            xTaskCreate(otaCheckAndUpdateTask, "ota_task", 16384, NULL, 5, NULL);
             state_ = CHECKING_VERSION;
             break;
         case CHECKING_VERSION:
-            if (versionCheckResult == VERSION_CHECK_NEW) {
-                if (performUpdate()) {
-                    state_ = UPDATING;
-                    updateStartTime_ = millis();
-                } else {
-                    state_ = UPDATE_FAILED;
-                }
-            } else if (versionCheckResult == VERSION_CHECK_SAME) {
+            if (versionCheckResult == VERSION_CHECK_SAME || versionCheckResult == VERSION_CHECK_FAIL) {
                 state_ = CONNECTED;
-            } else if (versionCheckResult == VERSION_CHECK_FAIL) {
-                state_ = CONNECTED;
+            } else if (versionCheckResult == VERSION_CHECK_NEW) {
+                state_ = UPDATING;
             }
             break;
         case UPDATING: {
@@ -248,77 +314,5 @@ void BMOTA::handleConnecting() {
     }
 }
 
-static char versionResponseBuf[64];
-static int versionResponseLen = 0;
-
-static esp_err_t versionHttpEvent(esp_http_client_event_t* event) {
-    if (event->event_id == HTTP_EVENT_ON_DATA) {
-        int copyLen = event->data_len;
-        if (versionResponseLen + copyLen >= (int)sizeof(versionResponseBuf) - 1)
-            copyLen = sizeof(versionResponseBuf) - 1 - versionResponseLen;
-        if (copyLen > 0) {
-            memcpy(versionResponseBuf + versionResponseLen, event->data, copyLen);
-            versionResponseLen += copyLen;
-            versionResponseBuf[versionResponseLen] = '\0';
-        }
-    }
-    return ESP_OK;
-}
-
-static void versionCheckTask(void* param) {
-    Serial.printf("[OTA] Checking version at: %s\n", OTA_VERSION_URL);
-    Serial.printf("[OTA] Current firmware version: %s\n", FIRMWARE_VERSION);
-
-    versionResponseLen = 0;
-    versionResponseBuf[0] = '\0';
-
-    esp_http_client_config_t config = {};
-    config.url = OTA_VERSION_URL;
-    config.cert_pem = OTA_SERVER_CERT;
-    config.event_handler = versionHttpEvent;
-    config.buffer_size = 4096;
-    config.buffer_size_tx = 2048;
-    config.skip_cert_common_name_check = true;
-    config.max_redirection_count = 5;
-    config.disable_auto_redirect = false;
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    esp_err_t err = esp_http_client_perform(client);
-    int status = esp_http_client_get_status_code(client);
-    esp_http_client_cleanup(client);
-
-    if (err != ESP_OK || status != 200) {
-        Serial.printf("[OTA] Version check failed (err=%s, status=%d)\n", esp_err_to_name(err), status);
-        versionCheckResult = VERSION_CHECK_FAIL;
-        vTaskDelete(NULL);
-        return;
-    }
-
-    String remoteVersion = String(versionResponseBuf);
-    remoteVersion.trim();
-    Serial.printf("[OTA] Remote version: %s\n", remoteVersion.c_str());
-
-    if (remoteVersion.length() == 0 || remoteVersion == FIRMWARE_VERSION) {
-        Serial.println("[OTA] Already running latest version, no update needed");
-        versionCheckResult = VERSION_CHECK_SAME;
-    } else {
-        Serial.printf("[OTA] New version available: %s -> %s\n", FIRMWARE_VERSION, remoteVersion.c_str());
-        versionCheckResult = VERSION_CHECK_NEW;
-    }
-    vTaskDelete(NULL);
-}
-
-void BMOTA::startVersionCheck() {
-    versionCheckResult = VERSION_CHECK_PENDING;
-    xTaskCreate(versionCheckTask, "ver_check", 8192, NULL, 5, NULL);
-}
-
-bool BMOTA::performUpdate() {
-    Serial.printf("[OTA] Fetching firmware from: %s\n", OTA_FIRMWARE_URL);
-    Serial.printf("[OTA] Free heap: %u bytes\n", ESP.getFreeHeap());
-    otaResult = OTA_RESULT_PENDING;
-    xTaskCreate(otaTask, "ota_task", 8192, NULL, 5, NULL);
-    return true;
-}
 
 #endif  // OTA_ENABLED

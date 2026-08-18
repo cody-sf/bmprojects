@@ -1,5 +1,16 @@
 #include "BMDevice.h"
+
+// Sketches that ship OTA (BMGenericDevice) provide include/version.h; the rest
+// just report "dev". Without the guard the library only builds for projects
+// that happen to carry that header.
+#if defined(__has_include)
+#if __has_include("version.h")
 #include "version.h"
+#endif
+#endif
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "dev"
+#endif
 
 BMDevice::BMDevice(const char* deviceName, const char* serviceUUID, const char* featuresUUID, const char* statusUUID)
     : bluetoothHandler_(deviceName, serviceUUID, featuresUUID, statusUUID), lightShow_(std::vector<CLEDController*>(), deviceClock_),
@@ -7,9 +18,19 @@ BMDevice::BMDevice(const char* deviceName, const char* serviceUUID, const char* 
 #ifndef TARGET_ESP32_C6
       ownGPSSerial_(false), locationService_(nullptr),
 #endif
-      lastBluetoothSync_(0), 
-      statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL), statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0) {
-    
+      lastBluetoothSync_(0),
+      statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL),
+      statusDirty_(false), statusDirtyAt_(0), lastStatusSentAt_(0), lastFingerprintAt_(0),
+      stateFingerprint_(0), wasSubscribed_(false), ledsBlanked_(false),
+      statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0),
+      dynamicNaming_(false) {
+
+    // Initialize LED arrays (this constructor takes strips from the sketch, but
+    // the destructor walks the array either way)
+    for (int i = 0; i < MAX_LED_STRIPS; i++) {
+        ledArrays_[i] = nullptr;
+    }
+
     // Set up callbacks
     bluetoothHandler_.setFeatureCallback([this](uint8_t feature, const uint8_t* data, size_t length) {
         this->handleFeatureCommand(feature, data, length);
@@ -26,9 +47,13 @@ BMDevice::BMDevice(const char* serviceUUID, const char* featuresUUID, const char
 #ifndef TARGET_ESP32_C6
       ownGPSSerial_(false), locationService_(nullptr),
 #endif
-      lastBluetoothSync_(0), 
-      statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL), dynamicNaming_(true), statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0) {
-    
+      lastBluetoothSync_(0),
+      statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL),
+      statusDirty_(false), statusDirtyAt_(0), lastStatusSentAt_(0), lastFingerprintAt_(0),
+      stateFingerprint_(0), wasSubscribed_(false), ledsBlanked_(false),
+      statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0),
+      dynamicNaming_(true) {
+
     // Initialize LED arrays
     for (int i = 0; i < MAX_LED_STRIPS; i++) {
         ledArrays_[i] = nullptr;
@@ -164,27 +189,127 @@ void BMDevice::loop() {
     if (gpsEnabled_) {
         updateGPS();
     }
-    
+
     bluetoothHandler_.poll();
-    
+
     // Handle chunked status updates
     handleChunkedStatusUpdate();
-    
-    // Send status updates (now triggers chunked updates)
-    if ((millis() - lastBluetoothSync_) > statusUpdateInterval_ && bluetoothHandler_.isConnected()) {
+
+    // Status is pushed on connect and whenever settings change - never on a timer
+    if (takeDueStatusUpdate()) {
         startChunkedStatusUpdate();
-        lastBluetoothSync_ = millis();
     }
-    
+
     // Handle power state
     if (!deviceState_.power) {
-        FastLED.clear();
-        FastLED.show();
+        // Blank once on the transition. Re-clocking every strip on every loop
+        // burns the CPU and the LED data lines for no visible difference
+        // (8 x 450 LEDs is >100 ms of blocking output per pass).
+        if (!ledsBlanked_) {
+            FastLED.clear();
+            FastLED.show();
+            ledsBlanked_ = true;
+        }
         return;
     }
-    
+    ledsBlanked_ = false;
+
     // Render light show
     lightShow_.render();
+}
+
+void BMDevice::markStatusDirty() {
+    statusDirty_ = true;
+    statusDirtyAt_ = millis();
+}
+
+// Cheap rolling hash over everything the app displays. Deliberately excludes
+// GPS position/speed: those change continuously and would defeat the point of
+// event-driven updates (the app polls while a GPS screen is open instead).
+uint32_t BMDevice::computeStateFingerprint() {
+    uint32_t h = 2166136261u;  // FNV-1a
+    auto mix = [&h](uint32_t v) {
+        h ^= v;
+        h *= 16777619u;
+    };
+
+    mix(deviceState_.power ? 1u : 2u);
+    mix((uint32_t)deviceState_.brightness);
+    mix((uint32_t)deviceState_.speed);
+    mix(deviceState_.reverseStrip ? 1u : 2u);
+    mix((uint32_t)deviceState_.currentPalette);
+    mix((uint32_t)deviceState_.currentEffect);
+
+    mix((uint32_t)deviceState_.waveWidth);
+    mix((uint32_t)deviceState_.meteorCount);
+    mix((uint32_t)deviceState_.trailLength);
+    mix((uint32_t)deviceState_.heatVariance);
+    mix((uint32_t)deviceState_.mirrorCount);
+    mix((uint32_t)deviceState_.cometCount);
+    mix((uint32_t)deviceState_.dropRate);
+    mix((uint32_t)deviceState_.cloudScale);
+    mix((uint32_t)deviceState_.blobCount);
+    mix((uint32_t)deviceState_.waveCount);
+    mix((uint32_t)deviceState_.flashIntensity);
+    mix((uint32_t)deviceState_.flashFrequency);
+    mix((uint32_t)deviceState_.explosionSize);
+    mix((uint32_t)deviceState_.spiralArms);
+    mix(((uint32_t)deviceState_.effectColor.r << 16) |
+        ((uint32_t)deviceState_.effectColor.g << 8) |
+        (uint32_t)deviceState_.effectColor.b);
+    mix(deviceState_.gpsLightshowSpeedEnabled ? 1u : 2u);
+
+    return h;
+}
+
+bool BMDevice::takeDueStatusUpdate() {
+    unsigned long now = millis();
+
+    // Nothing can be delivered until the central subscribes to notifications.
+    // The rising edge is also the trigger for the on-connect burst: sending
+    // from the BLEConnected callback races the app, which only subscribes after
+    // it has discovered services.
+    bool subscribed = bluetoothHandler_.isConnected() && bluetoothHandler_.isSubscribed();
+    if (!subscribed) {
+        wasSubscribed_ = false;
+        // Keep the fingerprint current so reconnecting doesn't replay old churn
+        stateFingerprint_ = computeStateFingerprint();
+        lastFingerprintAt_ = now;
+        return false;
+    }
+    if (!wasSubscribed_) {
+        wasSubscribed_ = true;
+        statusDirty_ = true;
+        statusDirtyAt_ = 0;      // send the connect burst immediately
+        lastStatusSentAt_ = 0;
+    }
+
+    // Catch changes made straight through getState() (encoder menu, sketches)
+    if (now - lastFingerprintAt_ >= STATUS_FINGERPRINT_POLL_MS) {
+        lastFingerprintAt_ = now;
+        uint32_t fingerprint = computeStateFingerprint();
+        if (fingerprint != stateFingerprint_) {
+            stateFingerprint_ = fingerprint;
+            markStatusDirty();
+        }
+    }
+
+    if (!statusDirty_) {
+        return false;
+    }
+    // Coalesce bursts of changes (slider drags, startup fades) into one update
+    if (statusDirtyAt_ != 0 && (now - statusDirtyAt_) < STATUS_SETTLE_MS) {
+        return false;
+    }
+    if (lastStatusSentAt_ != 0 && (now - lastStatusSentAt_) < STATUS_MIN_INTERVAL_MS) {
+        return false;
+    }
+
+    statusDirty_ = false;
+    lastStatusSentAt_ = now;
+    lastBluetoothSync_ = now;
+    stateFingerprint_ = computeStateFingerprint();
+    return true;
 }
 
 void BMDevice::setBrightness(int brightness) {
@@ -218,6 +343,13 @@ void BMDevice::handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size
     
     // Handle standard features
     switch (feature) {
+        case BLE_FEATURE_REQUEST_STATUS:
+            // App asked for a refresh (page opened, poll tick). Answer now
+            // rather than waiting on the settle window.
+            statusDirty_ = true;
+            statusDirtyAt_ = 0;
+            lastStatusSentAt_ = 0;
+            return;
         case BLE_FEATURE_POWER:
             handlePowerFeature(buffer, length);
             break;
@@ -321,10 +453,16 @@ void BMDevice::handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size
 }
 
 void BMDevice::handleConnectionChange(bool connected) {
-    if (connected) {
-        startChunkedStatusUpdate();
+    // The connect burst is not sent from here: at this point the central has
+    // not enabled notifications yet, so anything written to the status
+    // characteristic is dropped. takeDueStatusUpdate() fires it on the
+    // subscribe edge instead.
+    if (!connected) {
+        wasSubscribed_ = false;
+        statusDirty_ = false;
+        statusUpdateState_ = STATUS_IDLE;
     }
-    
+
     if (customConnectionHandler_) {
         customConnectionHandler_(connected);
     }
@@ -530,12 +668,9 @@ void BMDevice::sendStatusUpdate() {
     doc["dir"] = deviceState_.reverseStrip;
     
     const char* effectName = LightShow::effectIdToName(deviceState_.currentEffect);
-    Serial.print("[BMDevice] sendStatusUpdate: Current effect ID: ");
-    Serial.print((uint8_t)deviceState_.currentEffect);
-    Serial.print(" (");
-    Serial.print(effectName);
-    Serial.println(")");
-    
+    BM_LOGV("[BMDevice] sendStatusUpdate: Current effect ID: %u (%s)\n",
+            (unsigned)deviceState_.currentEffect, effectName);
+
     doc["fx"] = effectName;
     doc["pal"] = LightShow::paletteIdToName(deviceState_.currentPalette);
     
@@ -559,8 +694,6 @@ void BMDevice::sendStatusUpdate() {
     
     String status;
     serializeJson(doc, status);
-    Serial.print("[BMDevice] sendStatusUpdate: Sending status: ");
-    Serial.println(status);
     bluetoothHandler_.sendStatusUpdate(status);
 }
 
@@ -818,6 +951,7 @@ bool BMDevice::saveCurrentAsDefaults() {
     bool success = defaults_.saveDefaults(newDefaults);
     if (success) {
         Serial.println("[BMDevice] Current state saved as defaults");
+        markStatusDirty();
     } else {
         Serial.println("[BMDevice] Failed to save current state as defaults");
     }
@@ -829,6 +963,7 @@ bool BMDevice::resetToFactoryDefaults() {
     bool success = defaults_.resetToFactory();
     if (success) {
         applyDefaults();
+        markStatusDirty();
         Serial.println("[BMDevice] Reset to factory defaults and applied");
     } else {
         Serial.println("[BMDevice] Failed to reset to factory defaults");
@@ -875,6 +1010,7 @@ void BMDevice::setMaxBrightness(int maxBrightness) {
         }
         Serial.print("[BMDevice] Max brightness set to: ");
         Serial.println(currentDefaults.maxBrightness);
+        markStatusDirty();
     }
 }
 
@@ -883,6 +1019,7 @@ void BMDevice::setDeviceOwner(const String& owner) {
     if (success) {
         Serial.print("[BMDevice] Device owner set to: ");
         Serial.println(owner);
+        markStatusDirty();
     }
 }
 
@@ -957,6 +1094,7 @@ void BMDevice::handleSetAutoOnFeature(const uint8_t* buffer, size_t length) {
         if (success) {
             Serial.print("[BMDevice] Auto-on set to: ");
             Serial.println(autoOn ? "true" : "false");
+            markStatusDirty();
         }
     }
 }
@@ -972,6 +1110,7 @@ void BMDevice::handleSetGPSLowSpeedFeature(const uint8_t* buffer, size_t length)
             Serial.print("[BMDevice] GPS low speed set to: ");
             Serial.print(speed);
             Serial.println(" km/h");
+            markStatusDirty();
         }
     }
 }
@@ -987,6 +1126,7 @@ void BMDevice::handleSetGPSTopSpeedFeature(const uint8_t* buffer, size_t length)
             Serial.print("[BMDevice] GPS top speed set to: ");
             Serial.print(speed);
             Serial.println(" km/h");
+            markStatusDirty();
         }
     }
 }
@@ -1011,6 +1151,7 @@ void BMDevice::handleSetDeviceTypeFeature(const uint8_t* buffer, size_t length) 
         if (success) {
             Serial.print("[BMDevice] Device type set to: ");
             Serial.println(deviceType);
+            markStatusDirty();
         }
     }
 }
@@ -1025,8 +1166,9 @@ void BMDevice::handleConfigureLEDStripFeature(const uint8_t* buffer, size_t leng
         
         bool success = defaults_.setLEDStripConfig(stripIndex, pin, numLeds, colorOrder, enabled);
         if (success) {
-            Serial.printf("[BMDevice] LED strip %d configured: Pin %d, %d LEDs, Color order %d, %s\n", 
+            Serial.printf("[BMDevice] LED strip %d configured: Pin %d, %d LEDs, Color order %d, %s\n",
                          stripIndex, pin, numLeds, colorOrder, enabled ? "enabled" : "disabled");
+            markStatusDirty();
         }
     }
 }
@@ -1164,7 +1306,7 @@ void BMDevice::startChunkedStatusUpdate() {
     currentChunkIndex_ = 0;
     statusUpdateTimer_ = millis();
     
-    Serial.printf("[BMDevice] Starting chunked status update (%d chunks)\n", statusChunks_.size());
+    BM_LOGV("[BMDevice] Starting chunked status update (%d chunks)\n", statusChunks_.size());
 }
 
 void BMDevice::clearStatusChunks() {
@@ -1185,8 +1327,8 @@ void BMDevice::handleChunkedStatusUpdate() {
         if (currentChunkIndex_ < statusChunks_.size()) {
             // Send current chunk
             StatusChunk& chunk = statusChunks_[currentChunkIndex_];
-            Serial.printf("[BMDevice] Sending chunk %d/%d: %s\n", 
-                         currentChunkIndex_ + 1, statusChunks_.size(), chunk.type.c_str());
+            BM_LOGV("[BMDevice] Sending chunk %d/%d: %s\n",
+                    currentChunkIndex_ + 1, statusChunks_.size(), chunk.type.c_str());
             
             chunk.sendFunction();
             
@@ -1196,7 +1338,7 @@ void BMDevice::handleChunkedStatusUpdate() {
         } else {
             // All chunks sent
             statusUpdateState_ = STATUS_IDLE;
-            Serial.println("[BMDevice] Chunked status update complete");
+            BM_LOGV("[BMDevice] Chunked status update complete\n");
         }
     }
 }
@@ -1238,7 +1380,7 @@ void BMDevice::sendBasicStatusChunk() {
     
     String status;
     serializeJson(doc, status);
-    Serial.printf("[BMDevice] Basic status chunk: %s\n", status.c_str());
+    BM_LOGV("[BMDevice] Basic status chunk: %s\n", status.c_str());
     bluetoothHandler_.sendStatusUpdate(status);
 }
 
@@ -1276,7 +1418,7 @@ void BMDevice::sendDeviceConfigChunk() {
     
     String status;
     serializeJson(doc, status);
-    Serial.printf("[BMDevice] Device config chunk: %s\n", status.c_str());
+    BM_LOGV("[BMDevice] Device config chunk: %s\n", status.c_str());
     bluetoothHandler_.sendStatusUpdate(status);
 }
 
@@ -1306,7 +1448,7 @@ void BMDevice::sendDefaultsChunk() {
     
     String status;
     serializeJson(doc, status);
-    Serial.printf("[BMDevice] Defaults chunk: %s\n", status.c_str());
+    BM_LOGV("[BMDevice] Defaults chunk: %s\n", status.c_str());
     bluetoothHandler_.sendStatusUpdate(status);
 }
 
@@ -1340,7 +1482,7 @@ void BMDevice::sendEffectParametersChunk() {
     
     String status;
     serializeJson(doc, status);
-    Serial.printf("[BMDevice] Effect parameters chunk: %s\n", status.c_str());
+    BM_LOGV("[BMDevice] Effect parameters chunk: %s\n", status.c_str());
     bluetoothHandler_.sendStatusUpdate(status);
 }
 

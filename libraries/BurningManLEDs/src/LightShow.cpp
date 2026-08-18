@@ -54,6 +54,8 @@ LightShow::LightShow(const std::vector<CLEDController *> &led_controllers, const
         &cosmicFirePalette,
         &alienGlowPalette,
         &moltenMetalPalette,
+        &purpleOrangePalette,
+        &orangePurplePalette,
         // Add other palettes as needed
     };
 }
@@ -150,6 +152,10 @@ CRGBPalette16 LightShow::getPalette(AvailablePalettes palette)
         return alien_glow_palette;
     case moltenmetal:
         return molten_metal_palette;
+    case purpleorange:
+        return purple_orange_palette;
+    case orangepurple:
+        return orange_purple_palette;
     default:
         return vga_palette; // Default or error palette
     }
@@ -1681,6 +1687,10 @@ const PaletteNameMapEntry paletteNameMap[] = {
     {"alienGlowPalette", AvailablePalettes::alienglow},
     {"moltenmetal", AvailablePalettes::moltenmetal},
     {"moltenMetalPalette", AvailablePalettes::moltenmetal},
+    {"purpleorange", AvailablePalettes::purpleorange},
+    {"purpleOrangePalette", AvailablePalettes::purpleorange},
+    {"orangepurple", AvailablePalettes::orangepurple},
+    {"orangePurplePalette", AvailablePalettes::orangepurple},
     // Add more as needed
 };
 const int paletteNameMapSize = sizeof(paletteNameMap) / sizeof(paletteNameMap[0]);
