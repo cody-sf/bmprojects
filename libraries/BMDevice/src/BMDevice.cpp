@@ -1059,7 +1059,20 @@ String BMDevice::buildAdvertisedName() const {
     if (label.length() == 0) {
         label = "New";
     }
-    return "BMDevice - " + label;
+
+    // The local name rides in the scan response, which is 31 bytes with 2 of
+    // overhead. ArduinoBLE's setLocalName refuses anything longer outright and
+    // returns false, and BLE.advertise() then goes out with no name at all -
+    // leaving the device invisible to any scan that matches on the name. Trim
+    // instead: the full name still reaches the apps in the status payload.
+    const unsigned int maxAdvertisedName = 29;
+    String advertised = "BMDevice - " + label;
+    if (advertised.length() > maxAdvertisedName) {
+        advertised = advertised.substring(0, maxAdvertisedName);
+        Serial.print("[BMDevice] Advertised name trimmed to fit the scan response: ");
+        Serial.println(advertised);
+    }
+    return advertised;
 }
 
 // Defaults Feature Handlers
