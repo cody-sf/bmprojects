@@ -80,8 +80,20 @@ enum AvailablePalettes : uint8_t
     alienglow,
     moltenmetal,
     purpleorange,
-    orangepurple
+    orangepurple,
+    // Slots the phone fills over BLE. They sit at the tail of the enum so every
+    // built-in palette keeps the id it already has on the wire.
+    custom1,
+    custom2,
+    custom3,
+    custom4
 };
+
+/// How many custom palettes a device stores.
+#define CUSTOM_PALETTE_COUNT 4
+/// A custom palette arrives as this many RGB entries - one per CRGBPalette16
+/// slot - so the device never has to interpolate a gradient itself.
+#define CUSTOM_PALETTE_ENTRIES 16
 
 // Trivial RGB for union members (CRGB has non-trivial ctor, breaks union default-init on strict compilers)
 struct SceneRGB { uint8_t r, g, b; };
@@ -297,6 +309,21 @@ public:
     void setPrimaryPalette(size_t index);
     LightScene getCurrentScene() const;
 
+    // --- Custom palettes ---
+    // Four slots the phone fills with a gradient it has already sampled to
+    // CUSTOM_PALETTE_ENTRIES colours (BLE_FEATURE_SET_CUSTOM_PALETTE). The
+    // device stores them and plays them like any other palette.
+    void setCustomPalette(uint8_t slot, const CRGB *entries);
+    void clearCustomPalette(uint8_t slot);
+    /// True for any built-in palette, and for a custom slot that has been
+    /// filled. An empty slot must never be selected - it would render black.
+    bool isPaletteAvailable(AvailablePalettes palette) const;
+
+    static bool isCustomPalette(AvailablePalettes palette);
+    /// The slot behind a custom palette id, or -1 for a built-in one.
+    static int customPaletteSlot(AvailablePalettes palette);
+    static AvailablePalettes customPaletteId(uint8_t slot);
+
     // --- Static mapping functions for effect/palette names <-> enums ---
     static LightSceneID effectNameToId(const char* name);
     static const char* effectIdToName(LightSceneID id);
@@ -329,6 +356,11 @@ private:
     uint16_t speed_;
     std::vector<CRGBPalette16 *> available_palettes_;
     AvailablePalettes current_palette_;
+    // Custom palettes live here rather than in available_palettes_: that vector
+    // is what the sync controller cycles through, and an empty slot in the
+    // rotation would show up as a stretch of black.
+    CRGBPalette16 custom_palettes_[CUSTOM_PALETTE_COUNT];
+    bool custom_palette_filled_[CUSTOM_PALETTE_COUNT];
     CRGB color_;
     
     // Variables for new modern effects

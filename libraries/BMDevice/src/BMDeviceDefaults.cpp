@@ -19,6 +19,7 @@ bool BMDeviceDefaults::begin() {
     if (success) {
         initialized_ = true;
         migrateIfNeeded();
+        loadCustomPalettes();
         
         // Load current defaults from storage
         DeviceDefaults defaults;
@@ -197,6 +198,9 @@ bool BMDeviceDefaults::resetToFactory() {
     // Clear all preferences
     bool success = preferences_.clear();
     if (success) {
+        for (int i = 0; i < CUSTOM_PALETTE_COUNT; i++) {
+            customPalettes_[i].clear();
+        }
         currentDefaults_.setFactoryDefaults();
         success = saveDefaults(currentDefaults_);
         Serial.println("[BMDeviceDefaults] Reset to factory defaults");
@@ -352,6 +356,76 @@ int BMDeviceDefaults::getActiveLEDStrips() {
     return currentDefaults_.activeLEDStrips;
 }
 
+bool BMDeviceDefaults::setCustomPalette(int slot, const String& name, const uint8_t* rgb) {
+    if (!initialized_ || slot < 0 || slot >= CUSTOM_PALETTE_COUNT || rgb == nullptr) {
+        return false;
+    }
+    
+    CustomPalette& palette = customPalettes_[slot];
+    palette.clear();
+    strncpy(palette.name, name.c_str(), CUSTOM_PALETTE_NAME_MAX);
+    palette.name[CUSTOM_PALETTE_NAME_MAX] = '\0';
+    memcpy(palette.rgb, rgb, sizeof(palette.rgb));
+    palette.used = true;
+    
+    char key[16];
+    snprintf(key, sizeof(key), "%s%d", PREF_CUSTOM_PALETTE_PREFIX, slot);
+    
+    uint8_t blob[CUSTOM_PALETTE_BLOB_SIZE];
+    memcpy(blob, palette.name, CUSTOM_PALETTE_NAME_MAX + 1);
+    memcpy(blob + CUSTOM_PALETTE_NAME_MAX + 1, palette.rgb, sizeof(palette.rgb));
+    
+    return preferences_.putBytes(key, blob, sizeof(blob)) == sizeof(blob);
+}
+
+bool BMDeviceDefaults::clearCustomPalette(int slot) {
+    if (!initialized_ || slot < 0 || slot >= CUSTOM_PALETTE_COUNT) {
+        return false;
+    }
+    
+    customPalettes_[slot].clear();
+    
+    char key[16];
+    snprintf(key, sizeof(key), "%s%d", PREF_CUSTOM_PALETTE_PREFIX, slot);
+    // remove() reports false for a key that was never written, which is not a
+    // failure - the slot is empty either way.
+    preferences_.remove(key);
+    return true;
+}
+
+const CustomPalette* BMDeviceDefaults::getCustomPalette(int slot) const {
+    if (slot < 0 || slot >= CUSTOM_PALETTE_COUNT) {
+        return nullptr;
+    }
+    return &customPalettes_[slot];
+}
+
+/// A slot with no key, or one whose blob is the wrong size for this firmware's
+/// layout, stays empty rather than loading garbage colours.
+void BMDeviceDefaults::loadCustomPalettes() {
+    for (int i = 0; i < CUSTOM_PALETTE_COUNT; i++) {
+        customPalettes_[i].clear();
+        
+        char key[16];
+        snprintf(key, sizeof(key), "%s%d", PREF_CUSTOM_PALETTE_PREFIX, i);
+        
+        if (preferences_.getBytesLength(key) != (size_t)CUSTOM_PALETTE_BLOB_SIZE) {
+            continue;
+        }
+        
+        uint8_t blob[CUSTOM_PALETTE_BLOB_SIZE];
+        if (preferences_.getBytes(key, blob, sizeof(blob)) != sizeof(blob)) {
+            continue;
+        }
+        
+        memcpy(customPalettes_[i].name, blob, CUSTOM_PALETTE_NAME_MAX + 1);
+        customPalettes_[i].name[CUSTOM_PALETTE_NAME_MAX] = '\0';
+        memcpy(customPalettes_[i].rgb, blob + CUSTOM_PALETTE_NAME_MAX + 1,
+               sizeof(customPalettes_[i].rgb));
+        customPalettes_[i].used = true;
+    }
+}
+
 DeviceDefaults BMDeviceDefaults::getCurrentDefaults() {
     return currentDefaults_;
 }
@@ -428,7 +502,7 @@ bool BMDeviceDefaults::validateDefaults(const DeviceDefaults& defaults) {
     if (defaults.version < 1) return false;
     
     // Check enum values are valid
-    if ((uint8_t)defaults.palette > (uint8_t)AvailablePalettes::moltenmetal) return false;
+    if ((uint8_t)defaults.palette > (uint8_t)AvailablePalettes::custom4) return false;
     if ((uint8_t)defaults.effect > (uint8_t)LightSceneID::spiral_galaxy) return false;
     
     return true;

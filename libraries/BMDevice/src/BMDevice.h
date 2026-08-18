@@ -183,6 +183,7 @@ private:
     void sendDeviceConfigChunk();
     void sendDefaultsChunk();
     void sendEffectParametersChunk();
+    void sendCustomPaletteChunk(int slot);
     void initializeDefaultStatusChunks();
     
     // Feature handlers
@@ -205,6 +206,13 @@ private:
     void handleSetMaxBrightnessFeature(const uint8_t* buffer, size_t length);
     void handleSetDeviceOwnerFeature(const uint8_t* buffer, size_t length);
     void handleSetDeviceNameFeature(const uint8_t* buffer, size_t length);
+    
+    // Custom palette handlers
+    void handleSetCustomPaletteFeature(const uint8_t* buffer, size_t length);
+    void handleDeleteCustomPaletteFeature(const uint8_t* buffer, size_t length);
+    /// Push every stored custom palette into the light show. Called at start-up
+    /// and whenever the defaults are reloaded.
+    void applyCustomPalettes();
     void handleSetAutoOnFeature(const uint8_t* buffer, size_t length);
     
     // GPS Speed feature handlers

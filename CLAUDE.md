@@ -200,3 +200,50 @@ A device flashed before `0x38` existed still reports the factory `"BMDevice"`,
 which both apps treat as a placeholder and fall back from.
 - A 2-byte palette/effect write is read by the firmware as a numeric id, not a
   one-character name.
+
+### Custom palettes
+
+A device has `CUSTOM_PALETTE_COUNT` (4) palette slots, stored in NVRAM and
+selectable as `custom1`..`custom4` — ordinary `AvailablePalettes` values at the
+tail of the enum, so every built-in palette keeps its id.
+
+The phone owns the library; the slots are a cache. `RNUmbrella` keeps an
+unbounded set of palettes in AsyncStorage (`providers/Settings/customPaletteStore.ts`)
+shared across every device. Selecting one that a device is not already holding
+uploads it into a free slot, or the slot that device has gone longest without
+playing, then selects it by name.
+
+The device stores colours, never gradient stops: the phone samples each palette
+to `CUSTOM_PALETTE_ENTRIES` (16) colours — one per `CRGBPalette16` entry — so the
+firmware does no interpolation. Everything goes through `samplePalette`
+(`utils/gradient.ts`), in one of two modes:
+
+- **Blend** (`sampleGradient`) — linear in sRGB, which is both what
+  `LinearGradient` previews and what FastLED blends between entries, so the
+  editor and the strip agree.
+- **Hard edges** (`sampleBands`) — the colours become equal solid bands with no
+  intermediates. This is how the banded built-ins (`earth`, `everglow`,
+  `melonball`, `heart`, `sofia`, `velvet`) are defined, by stacking two stops on
+  one position. Positions are ignored in this mode; only colour order matters.
+
+Stop positions are derived from order, not authored — `stopsFromColors` respaces
+them evenly on every add/remove — so the two modes above are the full range of
+what the editor can express. `sampleGradient` does honour arbitrary positions,
+including two stops stacked on one position, if per-stop positions are ever
+exposed.
+
+- `BLE_FEATURE_SET_CUSTOM_PALETTE` (`0x7C`): `[slot][nameLen][name ASCII][16 * rgb]`
+- `BLE_FEATURE_DELETE_CUSTOM_PALETTE` (`0x7D`): `[slot]`
+- Status: one `{"type":"cpal","i":<slot>,"n":<name>,"c":"<16 packed rrggbb>"}`
+  chunk per slot. A slot reports itself with an empty name when empty — that is
+  how a deletion reaches an app that did not make it. One slot per chunk because
+  all four together overflow the 512-byte characteristic.
+
+Two things this constrains:
+
+- An upload is ~67 bytes, so `BleManager.write` is passed an explicit
+  `maxByteSize`. At its 20-byte default it splits the command into several
+  writes, and the firmware reads each fragment as its own command. Android also
+  needs `requestMTU` on connect, which `BluetoothProvider` now does.
+- An empty slot is not selectable (`LightShow::isPaletteAvailable`); selecting
+  one would render black. The encoder skips empty slots for the same reason.

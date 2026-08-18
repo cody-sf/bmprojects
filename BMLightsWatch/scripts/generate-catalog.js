@@ -4,8 +4,13 @@
  * that already own this data:
  *
  *   - ../RNUmbrella/constants.ts      -> display names + swatch colors
- *   - ../libraries/BurningManLEDs/LightShow.cpp -> the palette/effect id strings
- *     the firmware actually accepts
+ *   - ../libraries/BurningManLEDs/src/LightShow.cpp -> the palette/effect id
+ *     strings the firmware actually accepts
+ *
+ * Read `src/LightShow.cpp`, not the copy beside it at the library root: only
+ * `src` is compiled (PlatformIO builds a library's `src` directory when it has
+ * one), and the two have drifted. The root copy still spells the newer palettes
+ * `electric_desert`; the firmware answers to `electricdesert`.
  *
  * The firmware is the source of truth for the wire strings; the app only
  * contributes pretty names and colors. A palette the firmware does not know
@@ -16,7 +21,7 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '../..');
 const CONSTANTS = path.join(ROOT, 'RNUmbrella/constants.ts');
-const LIGHTSHOW = path.join(ROOT, 'libraries/BurningManLEDs/LightShow.cpp');
+const LIGHTSHOW = path.join(ROOT, 'libraries/BurningManLEDs/src/LightShow.cpp');
 const OUT = path.join(ROOT, 'BMLightsWatch/BMLightsWatch/Model/Catalog.swift');
 
 /** Pull `export const <name> ... = { ... };` out of the TS file and eval it. */
@@ -60,7 +65,10 @@ const fwEffects = extractCppNames(cpp, 'effectNameMap');
 const title = s => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 const swiftStr = s => '"' + s.replace(/["\\]/g, '\\$&') + '"';
 
-// Firmware name -> app palette key: the app drops the underscores.
+// Firmware name -> app palette key: the app drops the underscores. Palettes the
+// app has no colors for are skipped, which is also what keeps the four custom
+// slots ("custom1".."custom4") out of the catalog - those are filled at runtime
+// from what a device reports, not baked in here.
 const paletteRows = [];
 const skippedPalettes = [];
 for (const fwName of fwPalettes) {
@@ -72,10 +80,18 @@ for (const fwName of fwPalettes) {
 const orphanAppPalettes = Object.keys(palettes)
   .filter(k => !fwPalettes.some(f => f.replace(/_/g, '') === k));
 
-// Firmware effect name -> app key (modeMapping) -> display name.
+// Firmware effect name -> display name. The firmware's table mixes spellings:
+// most entries are the long name the app also uses ("fire_plasma"), but a few
+// are the app's own short key ("pstream", "speedo"). So try the long name
+// through modeMapping first, then the short key directly, before falling back
+// to title-casing the id - which is what produced names like "Pstream".
 const effectRows = fwEffects.map(fwName => ({
   id: fwName,
-  name: (backpackModes[modeMapping[fwName]] || title(fwName)).trim(),
+  name: (
+    backpackModes[modeMapping[fwName]] ||
+    backpackModes[fwName] ||
+    title(fwName)
+  ).trim(),
 }));
 
 // The phone app writes its own short keys ("pstream", "electricdesert") rather
@@ -144,19 +160,30 @@ for (const e of effectRows) {
 }
 lines.push('    ]');
 lines.push('');
-lines.push('    /// Phone-app spellings that mean the same palette to us.');
-lines.push('    private static let paletteAliases: [String: String] = [');
-for (const [alias, id] of paletteAliases) {
-  lines.push(`        ${swiftStr(alias)}: ${swiftStr(id)},`);
-}
-lines.push('    ]');
+const pushAliases = (doc, name, entries) => {
+  lines.push(`    /// ${doc}`);
+  if (entries.length === 0) {
+    lines.push(`    private static let ${name}: [String: String] = [:]`);
+    return;
+  }
+  lines.push(`    private static let ${name}: [String: String] = [`);
+  for (const [alias, id] of entries) {
+    lines.push(`        ${swiftStr(alias)}: ${swiftStr(id)},`);
+  }
+  lines.push('    ]');
+};
+
+pushAliases(
+  'Phone-app spellings that mean the same palette to us.',
+  'paletteAliases',
+  paletteAliases,
+);
 lines.push('');
-lines.push('    /// Phone-app spellings that mean the same effect to us.');
-lines.push('    private static let effectAliases: [String: String] = [');
-for (const [alias, id] of effectAliases) {
-  lines.push(`        ${swiftStr(alias)}: ${swiftStr(id)},`);
-}
-lines.push('    ]');
+pushAliases(
+  'Phone-app spellings that mean the same effect to us.',
+  'effectAliases',
+  effectAliases,
+);
 lines.push('');
 lines.push('    static func palette(id: String) -> BMPalette? {');
 lines.push('        let key = paletteAliases[id] ?? id');

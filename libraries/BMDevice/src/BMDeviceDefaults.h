@@ -26,6 +26,31 @@ struct LEDStripConfig {
 #define DEFAULTS_NAMESPACE "bmdefaults"
 #define DEFAULTS_VERSION 1
 
+/// Longest name a person can give a custom palette.
+#define CUSTOM_PALETTE_NAME_MAX 16
+
+/// One of the device's custom palette slots: a name plus the colours the phone
+/// sampled off the gradient, one per CRGBPalette16 entry.
+struct CustomPalette {
+    bool used;
+    char name[CUSTOM_PALETTE_NAME_MAX + 1];
+    uint8_t rgb[CUSTOM_PALETTE_ENTRIES * 3];
+
+    CustomPalette() {
+        clear();
+    }
+
+    void clear() {
+        used = false;
+        name[0] = '\0';
+        memset(rgb, 0, sizeof(rgb));
+    }
+};
+
+/// What one slot occupies in NVRAM: the name (fixed width, always terminated)
+/// followed by the colours.
+#define CUSTOM_PALETTE_BLOB_SIZE (CUSTOM_PALETTE_NAME_MAX + 1 + CUSTOM_PALETTE_ENTRIES * 3)
+
 // Default setting keys
 #define PREF_BRIGHTNESS "brightness"
 #define PREF_MAX_BRIGHTNESS "maxBrightness"
@@ -50,6 +75,8 @@ struct LEDStripConfig {
 #define PREF_GPS_TOP_SPEED "gpsTopSpeed"
 #define PREF_GPS_LIGHTSHOW_SPEED_ENABLED "gpsLightshowSpeedEnabled"
 #define PREF_SYNC_ENABLED "syncEnabled"
+// One key per custom palette slot: "cpal0" ... "cpal3".
+#define PREF_CUSTOM_PALETTE_PREFIX "cpal"
 
 struct DeviceDefaults {
     // Core settings
@@ -172,6 +199,15 @@ public:
     bool setSyncEnabled(bool enabled);
     bool isSyncEnabled();
     
+    // Custom palettes. Kept off DeviceDefaults deliberately: that struct is
+    // copied by value on every status chunk, and four palettes would add a
+    // quarter-kilobyte to each of those copies. `rgb` is CUSTOM_PALETTE_ENTRIES
+    // RGB triplets. Both setters write through to NVRAM immediately.
+    bool setCustomPalette(int slot, const String& name, const uint8_t* rgb);
+    bool clearCustomPalette(int slot);
+    /// Null for an out-of-range slot; check `used` for an empty one.
+    const CustomPalette* getCustomPalette(int slot) const;
+    
     // Get current defaults
     DeviceDefaults getCurrentDefaults();
     
@@ -192,9 +228,11 @@ public:
 private:
     Preferences preferences_;
     DeviceDefaults currentDefaults_;
+    CustomPalette customPalettes_[CUSTOM_PALETTE_COUNT];
     bool initialized_;
     
     // Helper methods
+    void loadCustomPalettes();
     void constrainValues(DeviceDefaults& defaults);
     bool writeString(const char* key, const String& value);
     String readString(const char* key, const String& defaultValue = "");

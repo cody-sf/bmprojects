@@ -1,6 +1,7 @@
 import Combine
 import CoreBluetooth
 import Foundation
+import SwiftUI
 
 /// A single discovered light: its connection state, the last status the firmware
 /// pushed, and the controls that write back to it.
@@ -44,6 +45,11 @@ final class BMDevice: NSObject, ObservableObject, Identifiable {
     @Published private(set) var owner: String?
     @Published private(set) var firmwareVersion: String?
     @Published private(set) var configuredName: String?
+    /// The palettes made in the phone app and stored on this device, keyed by
+    /// slot. Per slot rather than as a list because the firmware reports one
+    /// slot per status chunk - a list would be wiped and rebuilt four times per
+    /// burst, and flicker on the palette grid while it happened.
+    @Published private(set) var customPalettesBySlot: [Int: BMPalette] = [:]
 
     weak var central: BMCentral?
 
@@ -75,7 +81,18 @@ final class BMDevice: NSObject, ObservableObject, Identifiable {
         BMNaming.resolve(id: id, advertised: advertisedName, configured: configuredName)
     }
 
-    var palette: BMPalette { BMCatalog.palette(id: paletteId) ?? BMCatalog.palettes[0] }
+    /// In slot order, so the grid does not reshuffle when a slot is rewritten.
+    var customPalettes: [BMPalette] {
+        customPalettesBySlot.keys.sorted().compactMap { customPalettesBySlot[$0] }
+    }
+
+    var palette: BMPalette {
+        // A custom id resolves against this device: the catalog is built at
+        // compile time and knows nothing about slots.
+        BMCatalog.palette(id: paletteId)
+            ?? customPalettes.first { $0.id == paletteId }
+            ?? BMCatalog.palettes[0]
+    }
     var effect: BMEffect { BMCatalog.effect(id: effectId) ?? BMCatalog.effects[0] }
     /// The bike has no status characteristic, so its state is write-only.
     var reportsStatus: Bool { profile?.status != nil }
@@ -105,6 +122,8 @@ final class BMDevice: NSObject, ObservableObject, Identifiable {
         paletteId = palette.id
         write(.palette(palette.id))
     }
+
+    var availablePalettes: [BMPalette] { BMCatalog.palettes + customPalettes }
 
     func setEffect(_ effect: BMEffect) {
         effectId = effect.id
@@ -181,6 +200,55 @@ final class BMDevice: NSObject, ObservableObject, Identifiable {
 
     var writeTarget: CBCharacteristic? { featuresCharacteristic }
 
+    /// One custom palette slot: `{"type":"cpal","i":0,"n":"Sunset","c":"<hex>"}`.
+    /// An empty name, or colours that do not unpack, means the slot is empty -
+    /// that is how a palette deleted on the phone reaches the watch.
+    private func applyCustomPaletteChunk(_ object: [String: Any]) {
+        guard let slot = object["i"] as? Int, slot >= 0 else { return }
+
+        let name = (object["n"] as? String) ?? ""
+        guard !name.isEmpty,
+              let packed = object["c"] as? String,
+              let colors = BMDevice.unpackPaletteColors(packed) else {
+            customPalettesBySlot[slot] = nil
+            return
+        }
+
+        customPalettesBySlot[slot] = BMPalette(
+            id: "custom\(slot + 1)",
+            name: name,
+            colors: colors
+        )
+    }
+
+    /// `rrggbb` repeated, one per palette entry, down to the handful of stops a
+    /// watch-sized swatch can actually show. Same reduction the generated
+    /// catalog applies to the built-in palettes.
+    static func unpackPaletteColors(_ packed: String, sampled: Int = 5) -> [Color]? {
+        guard packed.count % 6 == 0, packed.count >= 6 else { return nil }
+
+        let hexes = stride(from: 0, to: packed.count, by: 6).map { offset -> String in
+            let start = packed.index(packed.startIndex, offsetBy: offset)
+            let end = packed.index(start, offsetBy: 6)
+            return String(packed[start..<end])
+        }
+
+        var colors: [Color] = []
+        let step = hexes.count <= sampled ? 1.0 : Double(hexes.count - 1) / Double(sampled - 1)
+        let count = hexes.count <= sampled ? hexes.count : sampled
+        for i in 0..<count {
+            guard let value = UInt32(hexes[Int((Double(i) * step).rounded())], radix: 16) else {
+                return nil
+            }
+            colors.append(Color(
+                red: Double((value >> 16) & 0xFF) / 255.0,
+                green: Double((value >> 8) & 0xFF) / 255.0,
+                blue: Double(value & 0xFF) / 255.0
+            ))
+        }
+        return colors.isEmpty ? nil : colors
+    }
+
     /// Merge one status notification. The firmware sends state in several small
     /// JSON chunks, each a complete object holding a subset of the keys, so only
     /// the keys actually present may be applied.
@@ -197,13 +265,21 @@ final class BMDevice: NSObject, ObservableObject, Identifiable {
         if let value = object["fx"] as? String, let effect = BMCatalog.effect(id: value) {
             effectId = effect.id
         }
-        if let value = object["pal"] as? String, let palette = BMCatalog.palette(id: value) {
-            paletteId = palette.id
+        if let value = object["pal"] as? String {
+            // Accept a custom id even before the slot chunk carrying its colours
+            // has arrived - `palette` falls back until it does.
+            if let palette = BMCatalog.palette(id: value) {
+                paletteId = palette.id
+            } else if value.hasPrefix("custom") {
+                paletteId = value
+            }
         }
         if let value = object["maxBri"] as? Int { maxBrightness = value.clamped(to: 1...100) }
         if let value = object["owner"] as? String, !value.isEmpty { owner = value }
         if let value = object["deviceName"] as? String, !value.isEmpty { configuredName = value }
         if let value = object["fwVer"] as? String, !value.isEmpty { firmwareVersion = value }
+
+        if object["type"] as? String == "cpal" { applyCustomPaletteChunk(object) }
 
         hasStatus = true
     }

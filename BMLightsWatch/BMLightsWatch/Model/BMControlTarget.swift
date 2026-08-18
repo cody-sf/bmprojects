@@ -16,6 +16,9 @@ protocol BMControlTarget: ObservableObject {
     var reversed: Bool { get }
     var palette: BMPalette { get }
     var effect: BMEffect { get }
+    /// What the palette grid shows: the built-in catalog, plus whatever custom
+    /// palettes the device is holding in its slots.
+    var availablePalettes: [BMPalette] { get }
 
     func togglePower()
     func setBrightness(_ value: Int)

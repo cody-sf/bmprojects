@@ -442,6 +442,14 @@ void BMDevice::handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size
             handleResetToDefaultsFeature(buffer, length);
             break;
             
+        // Custom palettes
+        case BLE_FEATURE_SET_CUSTOM_PALETTE:
+            handleSetCustomPaletteFeature(buffer, length);
+            break;
+        case BLE_FEATURE_DELETE_CUSTOM_PALETTE:
+            handleDeleteCustomPaletteFeature(buffer, length);
+            break;
+            
         default:
             Serial.print("[BMDevice] Unknown feature: 0x");
             Serial.println(feature, HEX);
@@ -754,7 +762,10 @@ void BMDevice::handlePaletteFeature(const uint8_t* buffer, size_t length) {
     if (length > 1) {
         if (length == 2) { // ID
             uint8_t paletteId = buffer[1];
-            if (paletteId <= (uint8_t)AvailablePalettes::moltenmetal) {
+            // isPaletteAvailable also turns down an empty custom slot, which
+            // would otherwise select a palette that renders as nothing.
+            if (paletteId <= (uint8_t)AvailablePalettes::custom4 &&
+                lightShow_.isPaletteAvailable((AvailablePalettes)paletteId)) {
                 setPalette((AvailablePalettes)paletteId);
                 Serial.print("[BMDevice] Palette set to ID: ");
                 Serial.println(paletteId);
@@ -763,9 +774,14 @@ void BMDevice::handlePaletteFeature(const uint8_t* buffer, size_t length) {
             char paletteStr[32] = {0};
             memcpy(paletteStr, buffer + 1, min(length - 1, sizeof(paletteStr) - 1));
             AvailablePalettes palette = LightShow::paletteNameToId(paletteStr);
-            setPalette(palette);
-            Serial.print("[BMDevice] Palette set to: ");
-            Serial.println(paletteStr);
+            if (lightShow_.isPaletteAvailable(palette)) {
+                setPalette(palette);
+                Serial.print("[BMDevice] Palette set to: ");
+                Serial.println(paletteStr);
+            } else {
+                Serial.print("[BMDevice] Ignoring empty custom palette: ");
+                Serial.println(paletteStr);
+            }
         }
     }
 }
@@ -971,6 +987,10 @@ bool BMDevice::resetToFactoryDefaults() {
 void BMDevice::applyDefaults() {
     DeviceDefaults defaults = defaults_.getCurrentDefaults();
     
+    // Load the stored palettes first: the default palette may well be one of
+    // them, and selecting an empty slot renders black.
+    applyCustomPalettes();
+    
     // Apply defaults to current state. Stored brightness/max are 1-100; scale to 1-255 for LED
     int scaledB = (defaults.brightness * 255) / 100;
     int maxScaled = (defaults.maxBrightness * 255) / 100;
@@ -1136,6 +1156,91 @@ void BMDevice::handleSetDeviceOwnerFeature(const uint8_t* buffer, size_t length)
         size_t ownerLength = min(length - 1, sizeof(ownerStr) - 1);
         memcpy(ownerStr, buffer + 1, ownerLength);
         setDeviceOwner(String(ownerStr));
+    }
+}
+
+// [0x7C][slot][nameLen][name ASCII][CUSTOM_PALETTE_ENTRIES * RGB]
+void BMDevice::handleSetCustomPaletteFeature(const uint8_t* buffer, size_t length) {
+    const size_t colorBytes = CUSTOM_PALETTE_ENTRIES * 3;
+    if (length < 3) {
+        Serial.println("[BMDevice] Custom palette write too short");
+        return;
+    }
+    
+    uint8_t slot = buffer[1];
+    uint8_t nameLength = buffer[2];
+    if (slot >= CUSTOM_PALETTE_COUNT || nameLength > CUSTOM_PALETTE_NAME_MAX) {
+        Serial.println("[BMDevice] Custom palette slot or name out of range");
+        return;
+    }
+    if (length != 3 + (size_t)nameLength + colorBytes) {
+        Serial.printf("[BMDevice] Custom palette payload is %u bytes, expected %u\n",
+                      (unsigned)length, (unsigned)(3 + nameLength + colorBytes));
+        return;
+    }
+    
+    char name[CUSTOM_PALETTE_NAME_MAX + 1] = {0};
+    memcpy(name, buffer + 3, nameLength);
+    
+    const uint8_t* rgb = buffer + 3 + nameLength;
+    if (!defaults_.setCustomPalette(slot, String(name), rgb)) {
+        Serial.println("[BMDevice] Failed to store custom palette");
+        return;
+    }
+    
+    CRGB entries[CUSTOM_PALETTE_ENTRIES];
+    for (int i = 0; i < CUSTOM_PALETTE_ENTRIES; i++) {
+        entries[i] = CRGB(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
+    }
+    lightShow_.setCustomPalette(slot, entries);
+    
+    // Re-render if the slot being written is the one already playing, so
+    // editing a palette shows up without reselecting it.
+    if (deviceState_.currentPalette == LightShow::customPaletteId(slot)) {
+        updateLightShow();
+    }
+    
+    Serial.printf("[BMDevice] Custom palette %d set to \"%s\"\n", slot, name);
+    markStatusDirty();
+}
+
+// [0x7D][slot]
+void BMDevice::handleDeleteCustomPaletteFeature(const uint8_t* buffer, size_t length) {
+    if (length < 2) {
+        return;
+    }
+    
+    uint8_t slot = buffer[1];
+    if (slot >= CUSTOM_PALETTE_COUNT) {
+        return;
+    }
+    
+    defaults_.clearCustomPalette(slot);
+    lightShow_.clearCustomPalette(slot);
+    
+    // Deleting the palette that is playing would leave the device reporting a
+    // palette that no longer exists, so fall back to a built-in one.
+    if (deviceState_.currentPalette == LightShow::customPaletteId(slot)) {
+        setPalette(AvailablePalettes::cool);
+    }
+    
+    Serial.printf("[BMDevice] Custom palette %d cleared\n", slot);
+    markStatusDirty();
+}
+
+void BMDevice::applyCustomPalettes() {
+    for (int slot = 0; slot < CUSTOM_PALETTE_COUNT; slot++) {
+        const CustomPalette* stored = defaults_.getCustomPalette(slot);
+        if (stored == nullptr || !stored->used) {
+            lightShow_.clearCustomPalette(slot);
+            continue;
+        }
+        
+        CRGB entries[CUSTOM_PALETTE_ENTRIES];
+        for (int i = 0; i < CUSTOM_PALETTE_ENTRIES; i++) {
+            entries[i] = CRGB(stored->rgb[i * 3], stored->rgb[i * 3 + 1], stored->rgb[i * 3 + 2]);
+        }
+        lightShow_.setCustomPalette(slot, entries);
     }
 }
 
@@ -1513,6 +1618,36 @@ void BMDevice::sendDefaultsChunk() {
     bluetoothHandler_.sendStatusUpdate(status);
 }
 
+/// One chunk per custom palette slot, so a full palette (16 colours) still fits
+/// inside a single notification. An empty slot reports itself as empty rather
+/// than staying silent - that is how the apps learn a palette was deleted.
+void BMDevice::sendCustomPaletteChunk(int slot) {
+    StaticJsonDocument<256> doc;
+    doc["type"] = "cpal";
+    doc["i"] = slot;
+    
+    const CustomPalette* palette = defaults_.getCustomPalette(slot);
+    if (palette == nullptr || !palette->used) {
+        doc["n"] = "";
+    } else {
+        doc["n"] = palette->name;
+        
+        // Packed rrggbb per entry, no separators: the whole palette is 96
+        // characters that way, which leaves room for the name in one chunk.
+        char colors[CUSTOM_PALETTE_ENTRIES * 6 + 1];
+        for (int i = 0; i < CUSTOM_PALETTE_ENTRIES; i++) {
+            snprintf(colors + i * 6, 7, "%02x%02x%02x",
+                     palette->rgb[i * 3], palette->rgb[i * 3 + 1], palette->rgb[i * 3 + 2]);
+        }
+        doc["c"] = colors;
+    }
+    
+    String status;
+    serializeJson(doc, status);
+    BM_LOGV("[BMDevice] Custom palette chunk: %s\n", status.c_str());
+    bluetoothHandler_.sendStatusUpdate(status);
+}
+
 void BMDevice::sendEffectParametersChunk() {
     StaticJsonDocument<512> doc;
     
@@ -1556,6 +1691,11 @@ void BMDevice::initializeDefaultStatusChunks() {
     registerStatusChunk("devConfig", [this]() { sendDeviceConfigChunk(); }, "Device configuration and LED setup");
     registerStatusChunk("effectParams", [this]() { sendEffectParametersChunk(); }, "Effect parameters controlled via BLE commands 0x0B-0x19");
     registerStatusChunk("defaults", [this]() { sendDefaultsChunk(); }, "Persistent default settings");
+    for (int slot = 0; slot < CUSTOM_PALETTE_COUNT; slot++) {
+        registerStatusChunk("cpal" + String(slot),
+                            [this, slot]() { sendCustomPaletteChunk(slot); },
+                            "Custom palette slot " + String(slot));
+    }
     
     Serial.printf("[BMDevice] Initialized %d default status chunks\n", statusChunks_.size());
 } 

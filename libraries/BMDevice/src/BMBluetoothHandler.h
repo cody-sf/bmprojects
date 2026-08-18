@@ -63,6 +63,15 @@
 #define BLE_FEATURE_SET_WIFI_PASSWORD 0x79
 #define BLE_FEATURE_GET_WIFI_STATUS 0x7A
 #define BLE_FEATURE_OTA_CHECK_NOW 0x7B
+// Custom palettes. The phone owns the library and samples each gradient down to
+// CUSTOM_PALETTE_ENTRIES colours before sending it, so the device stores colours
+// rather than gradient stops and never interpolates. 0x7C+ for the same reason
+// as the OTA codes above.
+//   set:    [0x7C][slot][nameLen][name ASCII][CUSTOM_PALETTE_ENTRIES * RGB]
+//   delete: [0x7D][slot]
+// Selection reuses BLE_FEATURE_PALETTE with the name "custom1".."custom4".
+#define BLE_FEATURE_SET_CUSTOM_PALETTE 0x7C
+#define BLE_FEATURE_DELETE_CUSTOM_PALETTE 0x7D
 // The name a person gives this device. Persisted, reported in status, and
 // folded into the advertised name so both apps can read it without a pairing
 // list of their own.

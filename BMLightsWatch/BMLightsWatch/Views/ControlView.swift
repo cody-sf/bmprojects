@@ -88,7 +88,7 @@ struct PalettePage<Target: BMControlTarget>: View {
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 6) {
-                ForEach(BMCatalog.palettes) { palette in
+                ForEach(target.availablePalettes) { palette in
                     Button {
                         Haptics.tap()
                         target.setPalette(palette)

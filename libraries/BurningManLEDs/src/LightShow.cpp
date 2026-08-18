@@ -16,6 +16,14 @@ LightShow::LightShow(const std::vector<CLEDController *> &led_controllers, const
     // Initialize matrix drops
     memset(matrix_drops_, 0, sizeof(matrix_drops_));
 
+    // Custom palette slots start empty; getPalette() falls back until the phone
+    // uploads one.
+    for (uint8_t i = 0; i < CUSTOM_PALETTE_COUNT; ++i)
+    {
+        custom_palettes_[i] = CRGBPalette16(CRGB::Black);
+        custom_palette_filled_[i] = false;
+    }
+
     // Initialize the available palettes
     available_palettes_ = {
         &candyPalette,
@@ -156,9 +164,86 @@ CRGBPalette16 LightShow::getPalette(AvailablePalettes palette)
         return purple_orange_palette;
     case orangepurple:
         return orange_purple_palette;
+    case custom1:
+    case custom2:
+    case custom3:
+    case custom4:
+    {
+        const int slot = customPaletteSlot(palette);
+        if (slot >= 0 && custom_palette_filled_[slot])
+        {
+            return custom_palettes_[slot];
+        }
+        // Nothing uploaded to this slot yet. Falling back keeps an unfilled
+        // slot from rendering as a strip of black.
+        return cool_palette;
+    }
     default:
         return vga_palette; // Default or error palette
     }
+}
+
+bool LightShow::isCustomPalette(AvailablePalettes palette)
+{
+    return palette >= AvailablePalettes::custom1 && palette <= AvailablePalettes::custom4;
+}
+
+int LightShow::customPaletteSlot(AvailablePalettes palette)
+{
+    if (!isCustomPalette(palette))
+    {
+        return -1;
+    }
+    return static_cast<int>(palette) - static_cast<int>(AvailablePalettes::custom1);
+}
+
+AvailablePalettes LightShow::customPaletteId(uint8_t slot)
+{
+    if (slot >= CUSTOM_PALETTE_COUNT)
+    {
+        slot = 0;
+    }
+    return static_cast<AvailablePalettes>(static_cast<int>(AvailablePalettes::custom1) + slot);
+}
+
+void LightShow::setCustomPalette(uint8_t slot, const CRGB *entries)
+{
+    if (slot >= CUSTOM_PALETTE_COUNT || entries == nullptr)
+    {
+        return;
+    }
+    for (uint8_t i = 0; i < CUSTOM_PALETTE_ENTRIES; ++i)
+    {
+        custom_palettes_[slot][i] = entries[i];
+    }
+    custom_palette_filled_[slot] = true;
+
+    // A palette that is already playing has been copied into primary_palette_,
+    // so refresh that too rather than waiting for the next selection.
+    if (current_palette_ == customPaletteId(slot))
+    {
+        primary_palette_ = custom_palettes_[slot];
+    }
+}
+
+void LightShow::clearCustomPalette(uint8_t slot)
+{
+    if (slot >= CUSTOM_PALETTE_COUNT)
+    {
+        return;
+    }
+    custom_palette_filled_[slot] = false;
+    custom_palettes_[slot] = CRGBPalette16(CRGB::Black);
+}
+
+bool LightShow::isPaletteAvailable(AvailablePalettes palette) const
+{
+    const int slot = customPaletteSlot(palette);
+    if (slot >= 0)
+    {
+        return custom_palette_filled_[slot];
+    }
+    return palette <= AvailablePalettes::orangepurple;
 }
 
 void LightShow::add_led_controller(CLEDController *led_controller)
@@ -1691,6 +1776,10 @@ const PaletteNameMapEntry paletteNameMap[] = {
     {"purpleOrangePalette", AvailablePalettes::purpleorange},
     {"orangepurple", AvailablePalettes::orangepurple},
     {"orangePurplePalette", AvailablePalettes::orangepurple},
+    {"custom1", AvailablePalettes::custom1},
+    {"custom2", AvailablePalettes::custom2},
+    {"custom3", AvailablePalettes::custom3},
+    {"custom4", AvailablePalettes::custom4},
     // Add more as needed
 };
 const int paletteNameMapSize = sizeof(paletteNameMap) / sizeof(paletteNameMap[0]);

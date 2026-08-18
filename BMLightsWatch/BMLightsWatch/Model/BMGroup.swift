@@ -31,7 +31,23 @@ final class BMGroup: ObservableObject, BMControlTarget {
 
     var isReady: Bool { !targets.isEmpty }
     var maxBrightness: Int { targets.map(\.maxBrightness).min() ?? 100 }
-    var palette: BMPalette { BMCatalog.palette(id: paletteId) ?? BMCatalog.palettes[0] }
+    var palette: BMPalette {
+        BMCatalog.palette(id: paletteId)
+            ?? availablePalettes.first { $0.id == paletteId }
+            ?? BMCatalog.palettes[0]
+    }
+
+    /// Custom slots differ per device - slot 2 may hold different palettes on
+    /// two lights - so the group offers only the ones every connected light is
+    /// holding in the same slot. Sending one the others lack would leave them
+    /// playing something else.
+    var availablePalettes: [BMPalette] {
+        guard let first = targets.first else { return BMCatalog.palettes }
+        let shared = first.customPalettes.filter { palette in
+            targets.allSatisfy { $0.customPalettes.contains(palette) }
+        }
+        return BMCatalog.palettes + shared
+    }
     var effect: BMEffect { BMCatalog.effect(id: effectId) ?? BMCatalog.effects[0] }
     var singleDevice: BMDevice? { nil }
 

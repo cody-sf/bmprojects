@@ -184,12 +184,22 @@ void cyclePalette(int direction) {
     AvailablePalettes currentPalette = device.getState().currentPalette;
     int paletteIndex = static_cast<int>(currentPalette);
     
-    // Total number of palettes - moltenmetal is the last one (81)
-    const int totalPalettes = static_cast<int>(AvailablePalettes::moltenmetal) + 1;
+    // custom4 is the last id: the four slots the app uploads sit past the
+    // built-ins. Empty ones are skipped below.
+    const int totalPalettes = static_cast<int>(AvailablePalettes::custom4) + 1;
     
-    paletteIndex += direction;
-    if (paletteIndex < 0) paletteIndex = totalPalettes - 1;
-    if (paletteIndex >= totalPalettes) paletteIndex = 0;
+    // Walk until the next palette that is actually playable. The loop is
+    // bounded by the palette count, so an encoder turn can never spin forever
+    // even with every custom slot empty.
+    for (int step = 0; step < totalPalettes; step++) {
+        paletteIndex += direction;
+        if (paletteIndex < 0) paletteIndex = totalPalettes - 1;
+        if (paletteIndex >= totalPalettes) paletteIndex = 0;
+        
+        if (device.getLightShow().isPaletteAvailable(static_cast<AvailablePalettes>(paletteIndex))) {
+            break;
+        }
+    }
     
     device.setPalette(static_cast<AvailablePalettes>(paletteIndex));
     Serial.print("Palette changed to: ");

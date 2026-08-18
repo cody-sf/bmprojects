@@ -18,6 +18,7 @@ final class BMDemoTarget: ObservableObject, BMControlTarget {
     let isReady = true
     let maxBrightness = 100
     var palette: BMPalette { BMCatalog.palette(id: paletteId) ?? BMCatalog.palettes[0] }
+    var availablePalettes: [BMPalette] { BMCatalog.palettes }
     var effect: BMEffect { BMCatalog.effect(id: effectId) ?? BMCatalog.effects[0] }
     var singleDevice: BMDevice? { nil }
 

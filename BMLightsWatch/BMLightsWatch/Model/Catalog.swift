@@ -48,19 +48,21 @@ enum BMCatalog {
         BMPalette(id: "velvet", name: "Velvet", colors: [Color(red: 0.004, green: 0.310, blue: 0.314), Color(red: 0.004, green: 0.243, blue: 0.243), Color(red: 0.004, green: 0.169, blue: 0.157), Color(red: 0.004, green: 0.106, blue: 0.090), Color(red: 0.004, green: 0.051, blue: 0.039)]),
         BMPalette(id: "vga", name: "VGA", colors: [Color(red: 1.000, green: 1.000, blue: 1.000), Color(red: 0.000, green: 1.000, blue: 0.000), Color(red: 0.000, green: 0.000, blue: 0.000), Color(red: 0.161, green: 0.216, blue: 0.000), Color(red: 0.161, green: 0.000, blue: 0.173)]),
         BMPalette(id: "wave", name: "Wave", colors: [Color(red: 0.000, green: 0.682, blue: 0.769), Color(red: 0.000, green: 0.176, blue: 0.694), Color(red: 0.000, green: 0.878, blue: 1.000), Color(red: 0.024, green: 0.027, blue: 0.961), Color(red: 0.000, green: 0.961, blue: 1.000)]),
-        BMPalette(id: "electric_desert", name: "Electric Desert", colors: [Color(red: 1.000, green: 0.918, blue: 0.000), Color(red: 1.000, green: 0.435, blue: 0.000), Color(red: 0.416, green: 0.106, blue: 0.604), Color(red: 0.157, green: 0.208, blue: 0.576), Color(red: 0.000, green: 0.514, blue: 0.561)]),
-        BMPalette(id: "psychedelic_playa", name: "Psychedelic Playa", colors: [Color(red: 1.000, green: 0.000, blue: 0.800), Color(red: 1.000, green: 0.400, blue: 0.000), Color(red: 0.000, green: 1.000, blue: 0.800), Color(red: 0.000, green: 0.400, blue: 1.000), Color(red: 0.800, green: 0.000, blue: 1.000)]),
-        BMPalette(id: "burning_rainbow", name: "Burning Rainbow", colors: [Color(red: 1.000, green: 0.000, blue: 0.000), Color(red: 1.000, green: 1.000, blue: 0.000), Color(red: 0.294, green: 0.000, blue: 0.510), Color(red: 1.000, green: 0.078, blue: 0.576), Color(red: 1.000, green: 0.843, blue: 0.000)]),
-        BMPalette(id: "neon_nights", name: "Neon Nights", colors: [Color(red: 0.224, green: 1.000, blue: 0.078), Color(red: 1.000, green: 0.000, blue: 0.800), Color(red: 0.000, green: 1.000, blue: 0.918), Color(red: 0.667, green: 1.000, blue: 0.000), Color(red: 1.000, green: 0.000, blue: 0.902)]),
-        BMPalette(id: "desert_storm", name: "Desert Storm", colors: [Color(red: 0.957, green: 0.886, blue: 0.847), Color(red: 0.906, green: 0.435, blue: 0.318), Color(red: 0.969, green: 0.698, blue: 0.404), Color(red: 0.949, green: 0.439, blue: 0.349), Color(red: 0.596, green: 0.322, blue: 0.467)]),
-        BMPalette(id: "cosmic_fire", name: "Cosmic Fire", colors: [Color(red: 1.000, green: 0.435, blue: 0.000), Color(red: 1.000, green: 0.702, blue: 0.000), Color(red: 1.000, green: 0.992, blue: 0.906), Color(red: 0.835, green: 0.000, blue: 0.976), Color(red: 0.000, green: 0.898, blue: 1.000)]),
-        BMPalette(id: "alien_glow", name: "Alien Glow", colors: [Color(red: 0.224, green: 1.000, blue: 0.078), Color(red: 0.000, green: 1.000, blue: 0.800), Color(red: 0.000, green: 1.000, blue: 0.200), Color(red: 0.800, green: 1.000, blue: 0.000), Color(red: 1.000, green: 0.918, blue: 0.000)]),
-        BMPalette(id: "molten_metal", name: "Molten Metal", colors: [Color(red: 1.000, green: 0.843, blue: 0.000), Color(red: 1.000, green: 0.549, blue: 0.000), Color(red: 0.698, green: 0.133, blue: 0.133), Color(red: 0.663, green: 0.663, blue: 0.663), Color(red: 0.412, green: 0.412, blue: 0.412)]),
+        BMPalette(id: "electricdesert", name: "Electric Desert", colors: [Color(red: 1.000, green: 0.918, blue: 0.000), Color(red: 1.000, green: 0.435, blue: 0.000), Color(red: 0.416, green: 0.106, blue: 0.604), Color(red: 0.157, green: 0.208, blue: 0.576), Color(red: 0.000, green: 0.514, blue: 0.561)]),
+        BMPalette(id: "psychedelicplaya", name: "Psychedelic Playa", colors: [Color(red: 1.000, green: 0.000, blue: 0.800), Color(red: 1.000, green: 0.400, blue: 0.000), Color(red: 0.000, green: 1.000, blue: 0.800), Color(red: 0.000, green: 0.400, blue: 1.000), Color(red: 0.800, green: 0.000, blue: 1.000)]),
+        BMPalette(id: "burningrainbow", name: "Burning Rainbow", colors: [Color(red: 1.000, green: 0.000, blue: 0.000), Color(red: 1.000, green: 1.000, blue: 0.000), Color(red: 0.294, green: 0.000, blue: 0.510), Color(red: 1.000, green: 0.078, blue: 0.576), Color(red: 1.000, green: 0.843, blue: 0.000)]),
+        BMPalette(id: "neonnights", name: "Neon Nights", colors: [Color(red: 0.224, green: 1.000, blue: 0.078), Color(red: 1.000, green: 0.000, blue: 0.800), Color(red: 0.000, green: 1.000, blue: 0.918), Color(red: 0.667, green: 1.000, blue: 0.000), Color(red: 1.000, green: 0.000, blue: 0.902)]),
+        BMPalette(id: "desertstorm", name: "Desert Storm", colors: [Color(red: 0.957, green: 0.886, blue: 0.847), Color(red: 0.906, green: 0.435, blue: 0.318), Color(red: 0.969, green: 0.698, blue: 0.404), Color(red: 0.949, green: 0.439, blue: 0.349), Color(red: 0.596, green: 0.322, blue: 0.467)]),
+        BMPalette(id: "cosmicfire", name: "Cosmic Fire", colors: [Color(red: 1.000, green: 0.435, blue: 0.000), Color(red: 1.000, green: 0.702, blue: 0.000), Color(red: 1.000, green: 0.992, blue: 0.906), Color(red: 0.835, green: 0.000, blue: 0.976), Color(red: 0.000, green: 0.898, blue: 1.000)]),
+        BMPalette(id: "alienglow", name: "Alien Glow", colors: [Color(red: 0.224, green: 1.000, blue: 0.078), Color(red: 0.000, green: 1.000, blue: 0.800), Color(red: 0.000, green: 1.000, blue: 0.200), Color(red: 0.800, green: 1.000, blue: 0.000), Color(red: 1.000, green: 0.918, blue: 0.000)]),
+        BMPalette(id: "moltenmetal", name: "Molten Metal", colors: [Color(red: 1.000, green: 0.843, blue: 0.000), Color(red: 1.000, green: 0.549, blue: 0.000), Color(red: 0.698, green: 0.133, blue: 0.133), Color(red: 0.663, green: 0.663, blue: 0.663), Color(red: 0.412, green: 0.412, blue: 0.412)]),
+        BMPalette(id: "purpleorange", name: "Purple Orange", colors: [Color(red: 0.502, green: 0.000, blue: 1.000), Color(red: 1.000, green: 0.471, blue: 0.000), Color(red: 0.502, green: 0.000, blue: 1.000)]),
+        BMPalette(id: "orangepurple", name: "Orange Purple", colors: [Color(red: 1.000, green: 0.471, blue: 0.000), Color(red: 0.502, green: 0.000, blue: 1.000), Color(red: 1.000, green: 0.471, blue: 0.000)]),
     ]
 
     static let effects: [BMEffect] = [
-        BMEffect(id: "palette_stream", name: "Palette Stream"),
-        BMEffect(id: "palette_cycle", name: "Palette Cycle"),
+        BMEffect(id: "pstream", name: "Palette Stream"),
+        BMEffect(id: "pcycle", name: "Palette Cycle"),
         BMEffect(id: "pulse_wave", name: "Pulse Wave"),
         BMEffect(id: "meteor_shower", name: "Meteor Shower"),
         BMEffect(id: "fire_plasma", name: "Fire Plasma"),
@@ -73,25 +75,18 @@ enum BMCatalog {
         BMEffect(id: "lightning_storm", name: "Lightning Storm"),
         BMEffect(id: "color_explosion", name: "Color Explosion"),
         BMEffect(id: "spiral_galaxy", name: "Spiral Galaxy"),
+        BMEffect(id: "cradial", name: "Color Radial"),
+        BMEffect(id: "cwheel", name: "Color Wheel"),
+        BMEffect(id: "speedo", name: "Speedometer"),
+        BMEffect(id: "pstat", name: "Position Status"),
+        BMEffect(id: "off", name: "Off"),
     ]
 
     /// Phone-app spellings that mean the same palette to us.
-    private static let paletteAliases: [String: String] = [
-        "electricdesert": "electric_desert",
-        "psychedelicplaya": "psychedelic_playa",
-        "burningrainbow": "burning_rainbow",
-        "neonnights": "neon_nights",
-        "desertstorm": "desert_storm",
-        "cosmicfire": "cosmic_fire",
-        "alienglow": "alien_glow",
-        "moltenmetal": "molten_metal",
-    ]
+    private static let paletteAliases: [String: String] = [:]
 
     /// Phone-app spellings that mean the same effect to us.
-    private static let effectAliases: [String: String] = [
-        "pstream": "palette_stream",
-        "pcycle": "palette_cycle",
-    ]
+    private static let effectAliases: [String: String] = [:]
 
     static func palette(id: String) -> BMPalette? {
         let key = paletteAliases[id] ?? id
