@@ -146,17 +146,11 @@ bool BMDevice::begin() {
     
     // Handle dynamic naming
     if (dynamicNaming_) {
-        DeviceDefaults currentDefaults = defaults_.getCurrentDefaults();
-        String deviceName;
-        if (currentDefaults.owner.length() > 0) {
-            deviceName = "BMDevice - " + currentDefaults.owner;
-        } else {
-            deviceName = "BMDevice - New";
-        }
-        
+        String deviceName = buildAdvertisedName();
+
         Serial.print("[BMDevice] Dynamic device name: ");
         Serial.println(deviceName);
-        
+
         // Update the Bluetooth handler with the new name
         bluetoothHandler_.setDeviceName(deviceName.c_str());
     }
@@ -431,6 +425,9 @@ void BMDevice::handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size
         // Generic device configuration commands
         case BLE_FEATURE_SET_OWNER:
             handleSetDeviceOwnerFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_DEVICE_NAME:
+            handleSetDeviceNameFeature(buffer, length);
             break;
         case BLE_FEATURE_SET_DEVICE_TYPE:
             handleSetDeviceTypeFeature(buffer, length);
@@ -1019,8 +1016,50 @@ void BMDevice::setDeviceOwner(const String& owner) {
     if (success) {
         Serial.print("[BMDevice] Device owner set to: ");
         Serial.println(owner);
+        // The owner is part of the advertised name when no friendly name is set.
+        if (dynamicNaming_) {
+            bluetoothHandler_.setDeviceName(buildAdvertisedName().c_str());
+        }
         markStatusDirty();
     }
+}
+
+void BMDevice::setFriendlyName(const String& name) {
+    String trimmed = name;
+    trimmed.trim();
+    if (trimmed.length() == 0) {
+        Serial.println("[BMDevice] Ignoring empty device name");
+        return;
+    }
+
+    bool success = defaults_.setDeviceName(trimmed);
+    if (success) {
+        Serial.print("[BMDevice] Device name set to: ");
+        Serial.println(trimmed);
+        // Re-advertise so a scanning app sees the new name without a reboot.
+        if (dynamicNaming_) {
+            bluetoothHandler_.setDeviceName(buildAdvertisedName().c_str());
+        }
+        markStatusDirty();
+    }
+}
+
+String BMDevice::buildAdvertisedName() const {
+    DeviceDefaults current = const_cast<BMDeviceDefaults&>(defaults_).getCurrentDefaults();
+
+    // The friendly name wins; the owner is the fallback for devices set up
+    // before names existed. Either way the "BMDevice" identifier leads, because
+    // that prefix is what the apps match on while scanning.
+    String label = current.deviceName;
+    label.trim();
+    if (label.length() == 0 || label == "BMDevice") {
+        label = current.owner;
+        label.trim();
+    }
+    if (label.length() == 0) {
+        label = "New";
+    }
+    return "BMDevice - " + label;
 }
 
 // Defaults Feature Handlers
@@ -1084,6 +1123,15 @@ void BMDevice::handleSetDeviceOwnerFeature(const uint8_t* buffer, size_t length)
         size_t ownerLength = min(length - 1, sizeof(ownerStr) - 1);
         memcpy(ownerStr, buffer + 1, ownerLength);
         setDeviceOwner(String(ownerStr));
+    }
+}
+
+void BMDevice::handleSetDeviceNameFeature(const uint8_t* buffer, size_t length) {
+    if (length > 1) {
+        char nameStr[33] = {0};
+        size_t nameLength = min(length - 1, sizeof(nameStr) - 1);
+        memcpy(nameStr, buffer + 1, nameLength);
+        setFriendlyName(String(nameStr));
     }
 }
 

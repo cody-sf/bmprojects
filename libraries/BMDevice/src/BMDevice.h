@@ -96,6 +96,7 @@ public:
     void applyDefaults();
     void setMaxBrightness(int maxBrightness);
     void setDeviceOwner(const String& owner);
+    void setFriendlyName(const String& name);
     
     // Callbacks for custom behavior
     void setCustomFeatureHandler(std::function<bool(uint8_t feature, const uint8_t* data, size_t length)> handler);
@@ -203,6 +204,7 @@ private:
     void handleResetToFactoryFeature(const uint8_t* buffer, size_t length);
     void handleSetMaxBrightnessFeature(const uint8_t* buffer, size_t length);
     void handleSetDeviceOwnerFeature(const uint8_t* buffer, size_t length);
+    void handleSetDeviceNameFeature(const uint8_t* buffer, size_t length);
     void handleSetAutoOnFeature(const uint8_t* buffer, size_t length);
     
     // GPS Speed feature handlers
@@ -212,6 +214,10 @@ private:
     
     // Generic device configuration handlers
     void handleSetDeviceTypeFeature(const uint8_t* buffer, size_t length);
+    /// The name to advertise: "BMDevice - <friendly name>", falling back to the
+    /// owner and then "New". The "BMDevice" identifier always leads, because
+    /// that prefix is how the apps recognise our gear while scanning.
+    String buildAdvertisedName() const;
     void handleConfigureLEDStripFeature(const uint8_t* buffer, size_t length);
     void handleGetConfigurationFeature(const uint8_t* buffer, size_t length);
     void handleResetToDefaultsFeature(const uint8_t* buffer, size_t length);

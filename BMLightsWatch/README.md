@@ -108,10 +108,14 @@ the generic identifier is dropped. The firmware's own `deviceName` field is
 ignored unless it says something — nothing ever sets it, so it reads "BMDevice"
 on every generic device.
 
-**The per-device name you type into RNUmbrella lives on the phone**
-(AsyncStorage, keyed by peripheral id) and never reaches the hardware — only
-`owner` is written over BLE. So the watch cannot show it, and falls back to the
-owner or a short id. See the note at the end of this file.
+The name itself lives **on the device**, not in either app. RNUmbrella writes it
+over BLE with `set_device_name` (`0x38`); the firmware persists it, reports it in
+status as `deviceName`, and advertises as `BMDevice - <name>`. The watch reads it
+straight off the light, so it needs no name list of its own and no phone.
+
+A device flashed before `0x38` existed reports the factory `"BMDevice"`, which is
+treated as a placeholder — it will show its owner, or `Light 4A2F`, until it is
+reflashed and named.
 
 ## Troubleshooting
 

@@ -57,6 +57,10 @@
 #define BLE_FEATURE_SET_WIFI_SSID 0x35
 #define BLE_FEATURE_GET_WIFI_STATUS 0x36
 #define BLE_FEATURE_SET_WIFI_PASSWORD 0x37
+// The name a person gives this device. Persisted, reported in status, and
+// folded into the advertised name so both apps can read it without a pairing
+// list of their own.
+#define BLE_FEATURE_SET_DEVICE_NAME 0x38
 
 // How many centrals may be attached at once (phone + watch, plus a spare).
 // Three is the controller's ceiling, not ours: CONFIG_BTDM_CTRL_BLE_MAX_CONN on

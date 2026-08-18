@@ -76,6 +76,7 @@ The device can be configured through your mobile app using these BLE commands (d
 | Command | Code | Constant | Description | Data Format |
 |---------|------|----------|-------------|-------------|
 | Set Owner | 0x30 | BLE_FEATURE_SET_OWNER | Set device owner name | ASCII string |
+| Set Device Name | 0x38 | BLE_FEATURE_SET_DEVICE_NAME | Set the name a person gives this device | ASCII string (max 32) |
 | Set WiFi Credentials | 0x35 | BLE_FEATURE_SET_WIFI_CREDENTIALS | Set OTA WiFi network (SSID + password) | SSID\0password |
 | Get WiFi Status | 0x36 | BLE_FEATURE_GET_WIFI_STATUS | Get whether WiFi is configured (returns wifiConfigured, wifiSsid) | None |
 | Set Device Type | 0x31 | BLE_FEATURE_SET_DEVICE_TYPE | Set device type | ASCII string |
@@ -169,6 +170,7 @@ Device name: BMDevice - ALEX
 1. **Flash Firmware**: Upload to your ESP32/ESP32-C6 board
 2. **Connect via App**: Device appears as "BMDevice - New"
 3. **Set Owner**: Use command 0x30 to set owner name
+4. **Set Device Name**: Use command 0x38 to name the device. It is persisted, reported in status as `deviceName`, and folded into the advertised name as `BMDevice - <name>`, so the phone and the watch both read the same name.
 4. **Configure LEDs**: Use command 0x32 to configure LED strips
 5. **Set Device Type**: Use command 0x31 to set device type (optional)
 6. **Verify**: Device now appears as "BMDevice - [OWNER]"

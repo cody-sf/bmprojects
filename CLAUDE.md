@@ -188,10 +188,15 @@ Only the generic `BMDevice` identifier is stripped; real device words (Umbrella,
 Backpack, Bike) are descriptive and stay. Order of preference: app-assigned name,
 then cleaned advertised name, then `Light <last4 of id>`.
 
-The firmware's `defaults.deviceName` is **not** a name — nothing ever sets it, so
-it reads "BMDevice" on every generic device and is treated as a placeholder. The
-only name written to hardware is `owner` (`set_owner`, `0x30`); the per-device
-name typed into RNUmbrella is phone-local (AsyncStorage keyed by peripheral id),
-so the watch cannot see it.
+The device owns its own name. `BLE_FEATURE_SET_DEVICE_NAME` (`0x38`, ASCII
+string) persists `defaults.deviceName`, reports it in status as `deviceName`, and
+folds it into the advertised name via `BMDevice::buildAdvertisedName()` —
+`"BMDevice - <name>"`, falling back to the owner and then `"New"`. The
+`"BMDevice"` identifier always leads so scanning still matches.
+
+RNUmbrella writes the name over BLE (device setup and the device settings screen)
+and keeps its own copy only as an offline cache; what the device reports wins.
+A device flashed before `0x38` existed still reports the factory `"BMDevice"`,
+which both apps treat as a placeholder and fall back from.
 - A 2-byte palette/effect write is read by the firmware as a numeric id, not a
   one-character name.
