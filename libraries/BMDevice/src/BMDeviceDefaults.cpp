@@ -218,7 +218,10 @@ bool BMDeviceDefaults::setBrightness(int brightness) {
 }
 
 bool BMDeviceDefaults::setMaxBrightness(int maxBrightness) {
-    currentDefaults_.maxBrightness = constrain(maxBrightness, 1, 256);
+    // 1-100, matching constrainValues() and validateDefaults(). This used to
+    // allow up to 256, so a larger value was accepted and persisted here and
+    // then quietly clamped to 100 the next time the defaults were loaded.
+    currentDefaults_.maxBrightness = constrain(maxBrightness, 1, 100);
     // If current brightness exceeds new max, adjust it
     if (currentDefaults_.brightness > currentDefaults_.maxBrightness) {
         currentDefaults_.brightness = currentDefaults_.maxBrightness;

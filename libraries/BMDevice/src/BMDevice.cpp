@@ -668,7 +668,7 @@ void BMDevice::sendStatusUpdate() {
     
     // Basic device state. Report brightness as 1-100 (percent) for app
     doc["pwr"] = deviceState_.power;
-    doc["bri"] = (deviceState_.brightness * 100) / 255;
+    doc["bri"] = brightnessLevelToPercent(deviceState_.brightness);
     doc["spd"] = deviceState_.speed;
     doc["dir"] = deviceState_.reverseStrip;
     
@@ -717,8 +717,8 @@ void BMDevice::handleBrightnessFeature(const uint8_t* buffer, size_t length) {
         memcpy(&b, buffer + 1, sizeof(int));
         // App sends 1-100 (percent); scale to internal 1-255 and cap by max brightness
         DeviceDefaults defaults = defaults_.getCurrentDefaults();
-        int scaledB = (b * 255) / 100;
-        int maxScaled = (defaults.maxBrightness * 255) / 100;
+        int scaledB = brightnessPercentToLevel(b);
+        int maxScaled = brightnessPercentToLevel(defaults.maxBrightness);
         setBrightness(min(scaledB, maxScaled));
         Serial.print("[BMDevice] Brightness set to: ");
         Serial.println(deviceState_.brightness);
@@ -945,7 +945,7 @@ bool BMDevice::saveCurrentAsDefaults() {
     DeviceDefaults newDefaults;
     
     // Copy current state to defaults. Internal brightness is 1-255; store as 1-100 for app
-    newDefaults.brightness = constrain((deviceState_.brightness * 100) / 255, 1, currentDefaults.maxBrightness);
+    newDefaults.brightness = constrain(brightnessLevelToPercent(deviceState_.brightness), 1, currentDefaults.maxBrightness);
     newDefaults.speed = deviceState_.speed;
     newDefaults.palette = deviceState_.currentPalette;
     newDefaults.effect = deviceState_.currentEffect;
@@ -992,8 +992,8 @@ void BMDevice::applyDefaults() {
     applyCustomPalettes();
     
     // Apply defaults to current state. Stored brightness/max are 1-100; scale to 1-255 for LED
-    int scaledB = (defaults.brightness * 255) / 100;
-    int maxScaled = (defaults.maxBrightness * 255) / 100;
+    int scaledB = brightnessPercentToLevel(defaults.brightness);
+    int maxScaled = brightnessPercentToLevel(defaults.maxBrightness);
     setBrightness(min(scaledB, maxScaled));
     setEffect(defaults.effect);
     setPalette(defaults.palette);
@@ -1021,7 +1021,7 @@ void BMDevice::setMaxBrightness(int maxBrightness) {
     if (success) {
         // App sends 1-100; cap internal brightness (1-255) to new max scaled to 1-255
         DeviceDefaults currentDefaults = defaults_.getCurrentDefaults();
-        int maxScaled = (currentDefaults.maxBrightness * 255) / 100;
+        int maxScaled = brightnessPercentToLevel(currentDefaults.maxBrightness);
         if (deviceState_.brightness > maxScaled) {
             setBrightness(maxScaled);
         }
@@ -1521,7 +1521,7 @@ void BMDevice::sendBasicStatusChunk() {
     
     // Basic device state (same as original sendStatusUpdate). Report brightness as 1-100 for app
     doc["pwr"] = deviceState_.power;
-    doc["bri"] = (deviceState_.brightness * 100) / 255;
+    doc["bri"] = brightnessLevelToPercent(deviceState_.brightness);
     doc["spd"] = deviceState_.speed;
     doc["dir"] = deviceState_.reverseStrip;
     

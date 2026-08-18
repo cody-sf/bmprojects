@@ -1436,7 +1436,7 @@ void sendBasicStatus() {
     // Essential device state. Brightness is reported as 1-100 (percent) to match
     // what the app sends and what BMDevice reports - state.brightness is 1-255.
     doc["pwr"] = state.power;
-    doc["bri"] = (state.brightness * 100) / 255;
+    doc["bri"] = brightnessLevelToPercent(state.brightness);
     doc["spd"] = state.speed;
     doc["dir"] = state.reverseStrip;
     

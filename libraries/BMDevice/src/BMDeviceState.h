@@ -7,6 +7,26 @@
 #include <LightShow.h>
 #include <Position.h>
 
+/**
+ * Brightness crosses the wire as a percent (1-100) and lives internally as a
+ * FastLED level (1-255), so it is converted on every write, every status
+ * report, and every save.
+ *
+ * Both directions round rather than truncate. Two truncating conversions in a
+ * row cost a point off almost every value: the app would send 50, the device
+ * would store 127, and the next status burst would report 49 - so the slider
+ * visibly snapped back a point after every adjustment. At the bottom it was
+ * worse, with level 1 reporting as 0 and pushing the app's slider below its own
+ * minimum.
+ */
+inline int brightnessPercentToLevel(int percent) {
+    return (constrain(percent, 0, 100) * 255 + 50) / 100;
+}
+
+inline int brightnessLevelToPercent(int level) {
+    return (constrain(level, 0, 255) * 100 + 127) / 255;
+}
+
 class BMDeviceState {
 public:
     BMDeviceState();
