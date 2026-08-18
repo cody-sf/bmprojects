@@ -3,3 +3,8 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Claude Code: machine-local settings, and the worktrees it checks out here
+# (a registered git worktree is a second copy of the repo, not repo content).
+.claude/settings.local.json
+.claude/worktrees/
