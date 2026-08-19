@@ -247,3 +247,92 @@ Two things this constrains:
   needs `requestMTU` on connect, which `BluetoothProvider` now does.
 - An empty slot is not selectable (`LightShow::isPaletteAvailable`); selecting
   one would render black. The encoder skips empty slots for the same reason.
+
+---
+
+## Battery Charger (`BatteryCharger/`, device type `batterycharger`)
+
+An 8-port single-cell Li-ion charge monitor: each port has a battery under
+charge behind a /2 voltage divider on an ADC pin, plus one addressable WS2812
+status LED. It is a *monitor*, not a light — the app shows per-port voltage,
+charge %, and state; there is no palette/effect/brightness control.
+
+It has its own service UUID (`BATTERYCHARGER_UUIDS` in `constants.ts`, mirrored
+by `SERVICE_UUID` in `BatteryCharger/src/main.cpp` — keep the two in step), so
+the app detects it as its own type rather than a generic `BMDevice`.
+
+### Firmware notes
+
+Built on `BMDevice` for the BLE plumbing (chunked status, subscription gating,
+owner/name persistence, the app's `request_status` poll on `0x02`), but with two
+deliberate departures because it has no light show:
+
+- **The status LEDs are driven directly with FastLED, not registered with the
+  framework's `LightShow`.** `LightShow::render()` drives each of *its*
+  controllers with per-controller `showLeds()`, so a strip it never learned
+  about is left alone. The device is forced powered-on at boot
+  (`getState().power = true`) so the framework never runs its blank-the-strip
+  path (`FastLED.clear()/show()`, the only place it touches FastLED globally),
+  which would fight the status LEDs.
+- **The inherited lighting status chunks are cleared and replaced.** After
+  `begin()`, `clearStatusChunks()` drops the basic/effect/palette chunks, and a
+  single `batt` chunk is registered in their place. Status is pushed on a port
+  *state* change and in answer to the app's poll; live voltage drift rides the
+  poll so a stable box stays quiet on the radio.
+
+`PORTS[]` at the top of `main.cpp` is the single source of truth: each row maps
+an ADC pin → position in the WS2812 chain (`ledIndex`) → silk-screen label, and
+its order is the order the app displays ports in. Reorder/relabel there to match
+the box; nothing else changes. `STATUS_LED_PIN` is the WS2812 data GPIO. See the
+`battery-charger-pending-wiring` memory — these are placeholders until the
+EasyEDA export confirms them.
+
+Calibration is live and persisted in NVRAM (Preferences namespace `battcal`),
+adjustable over BLE. The custom feature codes are device-specific (not common),
+so they can reuse low numbers:
+
+- `0x50` get: trigger a battery status burst now
+- `0x51` set calibration: float LE (multimeter / ESP correction factor)
+- `0x52` reset calibration: back to the factory factor
+- `0x53` rescan ports: clear the per-port "seen charging" latches (see below)
+
+The framework hands the custom handler the whole write including the feature
+byte, so a float payload starts at `data[1]` and makes `length == 5` (as the
+framework's own handlers do — `buffer + 1`, `length >= 5`).
+
+### Wire protocol
+
+One status chunk covers the whole box, parallel arrays in `PORTS` order:
+
+```
+{"type":"batt","p":8,"cal":1.073,"lbl":["1",..],"mv":[4050,..],"st":[1,..]}
+```
+
+`st` is the `PortState` enum, matching `BATTERY_PORT_STATES` in `constants.ts`:
+0 empty (no battery), 1 charging, 2 full, 3 fault (over-voltage). It drives both
+the app's colours and the LED colours (empty off, charging amber, full green,
+fault blinking red).
+
+**Empty ports read *higher* than any battery.** Open-circuit, a CN3791's BAT
+output drifts up to the module's setpoint (~4.25 V on this board); a cell clamps
+its terminal to ≤ ~4.2 V, so a battery always reads below the empty float. So
+empty is a plain threshold: `classifyPort()` reports NONE at/above
+`MV_EMPTY_FLOAT` (4230 mV) — which also detects removal for free (pull a battery,
+the port floats back to 4.25). Below that a battery is present; a `reachedFull`
+latch (set at `MV_FULL_MARK` 4180 mV, cleared when the port reads empty) keeps a
+finished battery reading FULL as it relaxes rather than flipping to charging.
+`0x53` (the app's "Re-scan Ports") just clears the full latches. Thresholds are
+in the app-mV domain, so trim the calibration slider until an empty port reads
+~4.25 V in the app; the ADC itself uses `analogReadMilliVolts()` (factory
+calibration), so the trim only covers the divider resistor tolerance.
+
+### App notes
+
+Routed like the stoplight — `updateAppDeviceStatus('batterycharger', ...)` in
+`BluetoothProvider`, keyed on the chunk's own `type === 'batt'` (robust to the
+characteristic UUID coming back in different cases on iOS vs Android) rather than
+the generic `mapStatusPayload` path, because the per-port array is a composite
+the key/value table cannot express. `SettingsProvider` turns it into a `ports`
+array and derives each charge % from `BATTERY_MV_EMPTY`/`BATTERY_MV_FULL` (the
+firmware reports raw millivolts and never computes a percentage). The page lives
+at `pages/BatteryCharger/` and polls via `useStatusPolling` while on screen.
