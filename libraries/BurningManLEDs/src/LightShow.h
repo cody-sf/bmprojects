@@ -368,11 +368,13 @@ private:
     size_t heat_array_size_;       // Size of heat array
     uint8_t *meteor_positions_;    // Positions of meteors
     uint8_t *meteor_trails_;       // Trail intensities
-    uint8_t pulse_center_;         // Center position for pulse waves
+    // LED positions are uint16_t: strips run to 450 LEDs, and a uint8_t here
+    // wrapped every position past 255 back onto the front of the strip.
+    uint16_t pulse_center_;        // Center position for pulse waves
     uint8_t matrix_drops_[64];     // Matrix rain drop positions (max 64 drops)
     uint8_t plasma_offset_;        // Offset for plasma clouds
     float noise_x_, noise_y_;      // For smooth noise effects
-    uint8_t explosion_center_;     // Center of color explosion
+    uint16_t explosion_center_;    // Center of color explosion
     uint8_t spiral_angle_;         // Current spiral rotation
 };
 

@@ -30,6 +30,9 @@
 // How often the state fingerprint is recomputed to catch direct writes to
 // getState() (encoder menu, custom device code).
 #define STATUS_FINGERPRINT_POLL_MS 200
+// How often a GPS-driven show (speedometer, position_status, GPS speed
+// animation) re-reads the fix and adjusts itself.
+#define GPS_SHOW_REFRESH_MS 1000
 
 // Chunked status update system
 enum StatusUpdateState {
@@ -148,6 +151,8 @@ private:
     unsigned long lastFingerprintAt_;
     uint32_t stateFingerprint_;
     bool wasSubscribed_;
+    // Last time a GPS-driven show was re-evaluated against the current fix
+    unsigned long lastGpsShowRefresh_ = 0;
 
     // Power-off LED state, so the strips are cleared once instead of every loop
     bool ledsBlanked_;
@@ -173,8 +178,9 @@ private:
     void updateLightShow();
     void sendStatusUpdate();
     
-    // GPS speed mapping helper
+    // GPS speed mapping helpers
     uint16_t calculateEffectiveSpeed();
+    uint16_t positionStatusSpeed();
     
     // Chunked status update methods
     void handleChunkedStatusUpdate();

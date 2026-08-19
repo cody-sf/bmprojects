@@ -248,6 +248,9 @@ bool LightShow::isPaletteAvailable(AvailablePalettes palette) const
 
 void LightShow::add_led_controller(CLEDController *led_controller)
 {
+    // Dither stays off for the controller's lifetime; setting it here rather
+    // than on every render pass keeps the hot loop clean.
+    led_controller->setDither(0);
     led_controllers_.push_back(led_controller);
 }
 
@@ -440,7 +443,7 @@ void LightShow::apply_scene_updates(uint16_t speed)
     }
     if (active_scene_.scenes.palette_stream.duration != speed)
     {
-        active_scene_.scenes.palette_cycle.duration = speed;
+        active_scene_.scenes.palette_stream.duration = speed;
         scene_changed_ = true;
     }
 }
@@ -509,11 +512,6 @@ void LightShow::render()
 {
     unsigned long now = clock_.now();
 
-    for (auto &controller : led_controllers_)
-    {
-        controller->setDither(0);
-    }
-
     // Static scenes like solid colors don't need to be rendered if there are no changes.
     // However, render them at a slow default interval in case you plug the LEDs in after the
     // scene has been set. Animated scenes need to be rendered constantly even if the
@@ -574,6 +572,11 @@ void LightShow::render()
         {
             last_render_time_ = now;
             CRGBPalette16 current_palette = getPalette(active_scene_.primary_palette);
+            // One hue step per frame, shared by every strip. Advancing it
+            // inside the controller loop made an 8-strip rig cycle its colours
+            // 8x faster than a single-strip build at the same speed setting,
+            // and the `% 255` skipped a hue - uint8_t wraps on its own.
+            CRGB incoming = ColorFromPalette(current_palette, hue_);
 
             for (auto &controller : led_controllers_)
             {
@@ -584,7 +587,7 @@ void LightShow::render()
                     {
                         controller->leds()[i] = controller->leds()[i - 1];
                     }
-                    controller->leds()[0] = ColorFromPalette(current_palette, hue_);
+                    controller->leds()[0] = incoming;
                 }
                 else
                 {
@@ -594,12 +597,12 @@ void LightShow::render()
                         controller->leds()[i] = controller->leds()[i + 1];
                     }
 
-                    controller->leds()[last] = ColorFromPalette(current_palette, hue_);
+                    controller->leds()[last] = incoming;
                 }
 
-                hue_ = (hue_ + 1) % 255;
                 controller->showLeds(brightness_);
             }
+            hue_++;
         }
         break;
 
@@ -623,6 +626,9 @@ void LightShow::render()
         if (now - last_render_time_ > active_scene_.scenes.spectrum_stream.duration)
         {
             last_render_time_ = now;
+            // Advance once per frame so every strip streams the same rainbow
+            // at the same rate regardless of how many strips the device has.
+            CRGB incoming = CHSV(hue_, 255, 255);
 
             for (auto &controller : led_controllers_)
             {
@@ -633,10 +639,10 @@ void LightShow::render()
                     controller->leds()[i] = controller->leds()[i + 1];
                 }
 
-                controller->leds()[last] = CHSV(hue_, 255, 255);
-                hue_ += 3;
+                controller->leds()[last] = incoming;
                 controller->showLeds(active_scene_.brightness);
             }
+            hue_ += 3;
         }
         break;
 
@@ -786,7 +792,7 @@ void LightShow::render()
                 for (size_t i = 0; i < num_leds; i++)
                 {
                     // Create expanding pulse waves from center
-                    uint8_t distance = abs((int)i - (int)pulse_center_);
+                    uint16_t distance = abs((int)i - (int)pulse_center_);
                     uint8_t wave_val = sin8(distance * active_scene_.scenes.pulse_wave.wave_width + hue_);
                     leds[i] = ColorFromPalette(current_palette, wave_val);
                 }
@@ -816,12 +822,13 @@ void LightShow::render()
                     leds[i].fadeToBlackBy(60);
                 }
                 
-                // Update meteors
+                // Update meteors. The stored position is a 0-255 phase; the
+                // LED index it maps to must be wide enough for a 450-LED strip.
                 for (uint8_t m = 0; m < active_scene_.scenes.meteor_shower.meteor_count; m++)
                 {
                     if (meteor_positions_)
                     {
-                        uint8_t pos = (meteor_positions_[m] * num_leds) >> 8;
+                        size_t pos = ((size_t)meteor_positions_[m] * num_leds) >> 8;
                         if (pos < num_leds)
                         {
                             leds[pos] = ColorFromPalette(current_palette, meteor_positions_[m] + hue_);
@@ -883,16 +890,22 @@ void LightShow::render()
             {
                 size_t num_leds = controller->size();
                 CRGB *leds = controller->leds();
-                
+
+                // Section length is up to a whole strip, so it cannot live in
+                // a byte; the guards keep a zeroed scene from dividing by zero.
+                size_t mirrors = active_scene_.scenes.kaleidoscope.mirror_count;
+                if (mirrors == 0) mirrors = 1;
+                size_t mirror_section = num_leds / mirrors;
+                if (mirror_section == 0) mirror_section = 1;
+
                 for (size_t i = 0; i < num_leds; i++)
                 {
                     // Create kaleidoscope effect with mirroring
-                    uint8_t mirror_section = num_leds / active_scene_.scenes.kaleidoscope.mirror_count;
-                    uint8_t mirror_pos = i % mirror_section;
+                    size_t mirror_pos = i % mirror_section;
                     uint8_t pattern = sin8(mirror_pos * 8 + hue_) + cos8(mirror_pos * 4 + hue_ * 2);
                     leds[i] = ColorFromPalette(current_palette, pattern);
                 }
-                
+
                 controller->showLeds(active_scene_.brightness);
             }
             hue_ += 3;
@@ -915,20 +928,23 @@ void LightShow::render()
                     leds[i].fadeToBlackBy(80);
                 }
                 
-                // Draw rainbow comets
+                // Draw rainbow comets. comet_pos is a 0-255 phase; led_pos is a
+                // real LED index and must not be truncated to a byte.
                 for (uint8_t c = 0; c < active_scene_.scenes.rainbow_comet.comet_count; c++)
                 {
                     uint8_t comet_pos = (hue_ + c * (256 / active_scene_.scenes.rainbow_comet.comet_count)) % 256;
-                    uint8_t led_pos = (comet_pos * num_leds) >> 8;
-                    
+                    size_t led_pos = ((size_t)comet_pos * num_leds) >> 8;
+
                     if (led_pos < num_leds)
                     {
                         leds[led_pos] = CHSV(comet_pos + hue_, 255, 255);
-                        
-                        // Draw trail
-                        for (uint8_t t = 1; t < active_scene_.scenes.rainbow_comet.trail_length && led_pos >= t; t++)
+
+                        // Draw trail; the fade bottoms out at black instead of
+                        // wrapping back to full brightness on long trails.
+                        for (size_t t = 1; t < active_scene_.scenes.rainbow_comet.trail_length && led_pos >= t; t++)
                         {
-                            leds[led_pos - t] = CHSV(comet_pos + hue_, 255, 255 - (t * 40));
+                            uint8_t fade = (t * 40 > 255) ? 0 : 255 - (t * 40);
+                            leds[led_pos - t] = CHSV(comet_pos + hue_, 255, fade);
                         }
                     }
                 }
@@ -968,18 +984,18 @@ void LightShow::render()
                     }
                 }
                 
-                // Update drops
+                // Update drops. A drop's stored value is a 0-255 phase that
+                // frees its slot when it wraps back to 0.
                 for (int d = 0; d < 64; d++)
                 {
                     if (matrix_drops_[d] > 0)
                     {
-                        uint8_t pos = (matrix_drops_[d] * num_leds) >> 8;
+                        size_t pos = ((size_t)matrix_drops_[d] * num_leds) >> 8;
                         if (pos < num_leds)
                         {
                             leds[pos] = CRGB(active_scene_.scenes.matrix_rain.color.r, active_scene_.scenes.matrix_rain.color.g, active_scene_.scenes.matrix_rain.color.b);
                         }
                         matrix_drops_[d] += 3;
-                        if (matrix_drops_[d] == 0) matrix_drops_[d] = 0; // Reset when wrapped
                     }
                 }
                 
@@ -1029,20 +1045,20 @@ void LightShow::render()
                 for (size_t i = 0; i < num_leds; i++)
                 {
                     uint8_t blob_influence = 0;
-                    
+
                     // Calculate influence from each blob
                     for (uint8_t b = 0; b < active_scene_.scenes.lava_lamp.blob_count; b++)
                     {
-                        uint8_t blob_pos = sin8(time_offset + b * 64) >> 2; // Blob position 0-63
-                        blob_pos = map(blob_pos, 0, 63, 0, num_leds - 1);
-                        
-                        uint8_t distance = abs((int)i - (int)blob_pos);
+                        uint8_t blob_wave = sin8(time_offset + b * 64) >> 2; // Blob phase 0-63
+                        size_t blob_pos = map(blob_wave, 0, 63, 0, num_leds - 1);
+
+                        int distance = abs((int)i - (int)blob_pos);
                         if (distance < 10) // Blob radius
                         {
                             blob_influence = std::max((int)blob_influence, 255 - (distance * 25));
                         }
                     }
-                    
+
                     leds[i] = ColorFromPalette(current_palette, blob_influence);
                 }
                 
@@ -1139,35 +1155,46 @@ void LightShow::render()
             CRGBPalette16 current_palette = getPalette(active_scene_.scenes.color_explosion.palette);
             unsigned long time_since_start = now - start_time_;
             
+            // How far the shock front has travelled, in LEDs. Not wrapped: the
+            // wave runs off the end of the strip once, then a fresh explosion
+            // is launched below.
+            size_t wave_position = time_since_start / 20;
+            size_t explosion_size = active_scene_.scenes.color_explosion.explosion_size;
+            if (explosion_size == 0) explosion_size = 1;
+            size_t longest_strip = 0;
+
             for (auto &controller : led_controllers_)
             {
                 size_t num_leds = controller->size();
+                if (num_leds > longest_strip) longest_strip = num_leds;
                 CRGB *leds = controller->leds();
-                
+
                 for (size_t i = 0; i < num_leds; i++)
                 {
                     // Distance from explosion center
-                    uint8_t distance = abs((int)i - (int)explosion_center_);
-                    
-                    // Explosion wave propagation
-                    uint8_t wave_position = (time_since_start / 20) % (num_leds * 2);
+                    size_t distance = abs((int)i - (int)explosion_center_);
+
                     uint8_t explosion_intensity = 0;
-                    
-                    if (distance <= wave_position && distance >= wave_position - active_scene_.scenes.color_explosion.explosion_size)
+                    // Written as distance + size >= wave to stay in unsigned
+                    // maths without underflowing when the wave is young.
+                    if (distance <= wave_position && distance + explosion_size >= wave_position)
                     {
-                        explosion_intensity = 255 - ((wave_position - distance) * (255 / active_scene_.scenes.color_explosion.explosion_size));
+                        explosion_intensity = 255 - (uint8_t)((wave_position - distance) * (255 / explosion_size));
                     }
-                    
+
                     leds[i] = ColorFromPalette(current_palette, explosion_intensity + hue_);
                 }
-                
+
                 controller->showLeds(active_scene_.brightness);
             }
-            
-            // Create new explosion occasionally
-            if (time_since_start % 500 == 0)
+
+            // Launch the next explosion once the wave has cleared the strip.
+            // (The old `time_since_start % 500 == 0` check only fired if a
+            // frame happened to land on an exact multiple of 500 ms, so a new
+            // centre was almost never picked.)
+            if (wave_position > longest_strip + explosion_size)
             {
-                explosion_center_ = random(0, led_controllers_.empty() ? 1 : led_controllers_[0]->size());
+                explosion_center_ = random(0, longest_strip ? longest_strip : 1);
                 start_time_ = now;
             }
             hue_ += 2;

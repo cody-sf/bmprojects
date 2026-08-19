@@ -170,8 +170,12 @@ void BMOTA::setWifiCredentials(const char* ssid, const char* password) {
 
     // Apply immediately so a just-provisioned device can update without a
     // reboot. If it is mid-check/mid-update, leave it be - the new creds are
-    // saved and take effect on the next connect.
+    // saved and take effect on the next connect. Provisioning counts as a
+    // manual check: skip the boot delay and (on battery builds) linger online
+    // afterwards so the person setting the device up sees it connect.
     if (state_ == IDLE || state_ == CONNECTING) {
+        bootDelayComplete_ = true;
+        forceCheckPending_ = true;
         WiFi.disconnect();
         connectWifi();
     }
@@ -310,7 +314,9 @@ void BMOTA::startLocalOta() {
 void BMOTA::loop() {
 #if LOCAL_OTA_ENABLED
     // Cheap when idle; blocks and reboots only during an actual local push.
-    if (localOtaStarted_) ArduinoOTA.handle();
+    // Skipped while the radio is down - battery builds turn WiFi fully off
+    // between checks.
+    if (localOtaStarted_ && WiFi.status() == WL_CONNECTED) ArduinoOTA.handle();
 #endif
 
     if (state_ == IDLE) return;
@@ -333,10 +339,20 @@ void BMOTA::loop() {
             bool firstCheck = (lastCheckTime_ == 0);
             bool intervalElapsed = (OTA_CHECK_INTERVAL_MS > 0 && now - lastCheckTime_ >= OTA_CHECK_INTERVAL_MS);
             if (firstCheck || intervalElapsed || forceCheckPending_) {
+                lastCheckWasManual_ = forceCheckPending_;
                 forceCheckPending_ = false;
                 lastCheckTime_ = now;
                 state_ = CHECKING;
+                break;
             }
+#if !OTA_KEEP_WIFI_ALIVE
+            // Check done. On battery, drop the radio rather than sitting
+            // associated until the next hourly interval; a manual check keeps
+            // the link up for a few minutes so espota can follow it.
+            if (lingerUntil_ == 0 || (long)(now - lingerUntil_) >= 0) {
+                shutdownWifi();
+            }
+#endif
             break;
         }
         case CHECKING:
@@ -349,6 +365,7 @@ void BMOTA::loop() {
             break;
         case CHECKING_VERSION:
             if (versionCheckResult == VERSION_CHECK_SAME || versionCheckResult == VERSION_CHECK_FAIL) {
+                lingerUntil_ = lastCheckWasManual_ ? millis() + OTA_MANUAL_LINGER_MS : 0;
                 state_ = CONNECTED;
             } else if (versionCheckResult == VERSION_CHECK_NEW) {
                 state_ = UPDATING;
@@ -364,6 +381,7 @@ void BMOTA::loop() {
             } else if (otaResult == OTA_RESULT_FAIL) {
                 unsigned long elapsed = millis() - updateStartTime_;
                 Serial.printf("[OTA] Firmware update failed after %lu ms\n", elapsed);
+                lingerUntil_ = lastCheckWasManual_ ? millis() + OTA_MANUAL_LINGER_MS : 0;
                 state_ = CONNECTED;
             }
             break;
@@ -377,6 +395,14 @@ void BMOTA::loop() {
     }
 }
 
+void BMOTA::shutdownWifi() {
+    Serial.println("[OTA] WiFi radio off - reconnects on the next request (app: Check for updates)");
+    WiFi.disconnect(true /* turn the radio off */);
+    WiFi.mode(WIFI_OFF);
+    lingerUntil_ = 0;
+    state_ = IDLE;
+}
+
 void BMOTA::handleConnecting() {
     wl_status_t status = WiFi.status();
     if (status == WL_CONNECTED) {
@@ -388,11 +414,12 @@ void BMOTA::handleConnecting() {
         startLocalOta();  // now that WiFi is up, accept local network pushes too
     } else if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) {
         Serial.printf("[OTA] WiFi connection failed (status: %d)\n", status);
-        state_ = IDLE;
+        // Fully off, not just IDLE: the Arduino stack keeps auto-reconnecting
+        // in STA mode otherwise, burning power with no state machine watching.
+        shutdownWifi();
     } else if (millis() - wifiConnectStart_ > 30000) {
         Serial.println("[OTA] WiFi connection timed out after 30s");
-        WiFi.disconnect();
-        state_ = IDLE;
+        shutdownWifi();
     }
 }
 

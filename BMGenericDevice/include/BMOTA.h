@@ -62,6 +62,15 @@ private:
     // Set by checkNow(); makes the next CONNECTED pass check immediately even if
     // the interval has not elapsed.
     bool forceCheckPending_ = false;
+    // Battery builds (OTA_KEEP_WIFI_ALIVE 0) drop WiFi after a check. A check
+    // the user asked for lingers online until this deadline so a local espota
+    // push can follow it; an automatic boot check disconnects straight away.
+    bool lastCheckWasManual_ = false;
+    unsigned long lingerUntil_ = 0;
+
+    /// Radio fully off and back to IDLE. checkNow()/setWifiCredentials() bring
+    /// it up again on demand.
+    void shutdownWifi();
 
     /// Bring WiFi up from stored/build-time credentials. Returns false when
     /// there are none. Shared by begin(), setWifiCredentials() and checkNow().

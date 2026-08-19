@@ -75,6 +75,24 @@
 #define LOCAL_OTA_ENABLED   1
 #define LOCAL_OTA_PASSWORD  "cody"   // the *_ota envs pass this with --auth automatically
 
+// ── WiFi power policy ────────────────────────────────────────────────────────
+// Battery-powered wearables turn the WiFi radio fully off after each update
+// check - staying associated costs tens of mA continuously on top of BLE, and
+// was the single biggest battery drain in the whole firmware. Mains-powered
+// signs keep it up: power is free there, and it keeps espota flashing and
+// hourly checks available.
+//
+// A battery build still checks once at boot, and again whenever the app sends
+// ota_check_now (0x7B) or fresh WiFi credentials. After one of those manual
+// checks it lingers online for OTA_MANUAL_LINGER_MS so a local espota push is
+// possible on demand ("Check for updates" in the app, then `pio run -e *_ota`).
+#if defined(TARGET_HOTEL_SIGN) || defined(TARGET_TAKOYAKI_SIGN)
+  #define OTA_KEEP_WIFI_ALIVE 1
+#else
+  #define OTA_KEEP_WIFI_ALIVE 0
+#endif
+#define OTA_MANUAL_LINGER_MS (5 * 60 * 1000)
+
 // Delay before first OTA check (ms) - allows device to stabilize
 #define OTA_BOOT_DELAY_MS  30000  // 30 seconds
 

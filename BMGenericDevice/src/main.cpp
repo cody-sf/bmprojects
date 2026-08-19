@@ -227,7 +227,11 @@ void handleEncoderChange() {
             case MENU_BRIGHTNESS: {
                 int brightness = device.getState().brightness;
                 brightness += direction * 10; // Change by 10 each step
-                brightness = constrain(brightness, 0, 125);
+                // Same ceiling the app respects: maxBrightness is stored as a
+                // percent, brightness internally as a 1-255 level.
+                int maxLevel = brightnessPercentToLevel(
+                    device.getDefaults().getCurrentDefaults().maxBrightness);
+                brightness = constrain(brightness, 1, maxLevel);
                 device.setBrightness(brightness);
                 
                 // If user manually adjusts brightness, update target and skip fade-up
@@ -323,11 +327,22 @@ CLEDController *neonCtrl = nullptr;
 #endif
 // ─────────────────────────────────────────────────────────────────────────────
 
+// CPU clock. BLE, WiFi and the RMT-driven WS2812 output (APB-clocked) all run
+// fine below the 240 MHz default, and every step down is a constant saving on
+// battery. 160 is a safe default for 8-strip rigs; single-strip wearables can
+// try -DBM_CPU_MHZ=80 in build_flags for more.
+#ifndef BM_CPU_MHZ
+#define BM_CPU_MHZ 160
+#endif
+
 void setup() {
+    setCpuFrequencyMhz(BM_CPU_MHZ);
+
     Serial.begin(115200);
     delay(100);
-    
+
     Serial.println("=== BMGeneric Device Starting ===");
+    Serial.printf("CPU: %d MHz\n", getCpuFrequencyMhz());
     
     // Add LED strips based on chip type
     Serial.println("Adding LED strips...");
@@ -336,7 +351,7 @@ void setup() {
     // ESP32-C6: Single strip on GPIO 17
     device.addLEDStrip<WS2812B, 17, COLOR_ORDER>(leds0, LEDS_PER_STRIP);
     Serial.println("ESP32-C6 configuration:");
-    Serial.println("  Strip 0: GPIO 17, 350 LEDs, GRB color order");
+    Serial.printf("  Strip 0: GPIO 17, %d LEDs, GRB color order\n", LEDS_PER_STRIP);
 
 #elif defined(TARGET_SLUT)
     // SLUT: 7 strips on the specified pins
@@ -558,26 +573,10 @@ void loop() {
 #if OTA_ENABLED
     ota.loop();
     if (ota.isUpdating()) {
-        fill_solid(leds0, LEDS_PER_STRIP, CRGB::Red);
-#if defined(TARGET_SLUT) || defined(TARGET_HOTEL_SIGN)
-        fill_solid(leds1, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds2, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds3, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds4, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds5, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds6, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds7, LEDS_PER_STRIP, CRGB::Red);
-#elif defined(TARGET_ESP32_C6)
-#else
-        fill_solid(leds1, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds2, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds3, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds4, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds5, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds6, LEDS_PER_STRIP, CRGB::Red);
-        fill_solid(leds7, LEDS_PER_STRIP, CRGB::Red);
-#endif
-        FastLED.show();
+        // Every registered strip solid red while the new image downloads,
+        // re-shown at a relaxed pace so the OTA task gets the CPU.
+        FastLED.showColor(CRGB::Red);
+        delay(100);
         return;
     }
 #endif

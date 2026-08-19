@@ -204,12 +204,36 @@ void BMDevice::loop() {
             FastLED.show();
             ledsBlanked_ = true;
         }
+        // Off but reachable: nothing to render, so poll the radio at a relaxed
+        // pace instead of spinning. Well inside a BLE connection interval.
+        delay(20);
         return;
     }
     ledsBlanked_ = false;
 
+    // GPS-driven modes are re-evaluated here: updateLightShow() otherwise only
+    // runs when a BLE command arrives, so the show never actually followed the
+    // GPS. setSpeed() adjusts the frame period in place - no scene restart, so
+    // the animation doesn't visibly jump when the pace changes.
+    if (gpsEnabled_ && deviceState_.positionAvailable &&
+        millis() - lastGpsShowRefresh_ >= GPS_SHOW_REFRESH_MS) {
+        lastGpsShowRefresh_ = millis();
+        if (deviceState_.currentEffect == LightSceneID::speedometer) {
+            updateLightShow();  // recomputes the slow/fast colour blend
+        } else if (deviceState_.currentEffect == LightSceneID::position_status) {
+            lightShow_.setSpeed(positionStatusSpeed());
+        } else if (deviceState_.gpsLightshowSpeedEnabled) {
+            lightShow_.setSpeed(calculateEffectiveSpeed());
+        }
+    }
+
     // Render light show
     lightShow_.render();
+
+    // Frames are gated on millis() inside render(), so this only adds <=1 ms of
+    // jitter to a >=5 ms frame period - invisible - while handing the CPU to
+    // the idle task instead of spinning this loop flat out.
+    delay(1);
 }
 
 void BMDevice::markStatusDirty() {
@@ -266,9 +290,13 @@ bool BMDevice::takeDueStatusUpdate() {
     bool subscribed = bluetoothHandler_.isConnected() && bluetoothHandler_.isSubscribed();
     if (!subscribed) {
         wasSubscribed_ = false;
-        // Keep the fingerprint current so reconnecting doesn't replay old churn
-        stateFingerprint_ = computeStateFingerprint();
-        lastFingerprintAt_ = now;
+        // Keep the fingerprint current so reconnecting doesn't replay old
+        // churn - but on the same cadence as the subscribed path, not every
+        // single pass through loop().
+        if (now - lastFingerprintAt_ >= STATUS_FINGERPRINT_POLL_MS) {
+            lastFingerprintAt_ = now;
+            stateFingerprint_ = computeStateFingerprint();
+        }
         return false;
     }
     if (!wasSubscribed_) {
@@ -577,6 +605,13 @@ uint16_t BMDevice::calculateEffectiveSpeed() {
     return effectiveSpeed;
 }
 
+// Frame period for position_status: distance from origin (0-1000 m) mapped to
+// speed (200 slow .. 20 fast) - closer to the origin cycles faster.
+uint16_t BMDevice::positionStatusSpeed() {
+    float distance = deviceState_.currentPosition.distance_from(deviceState_.origin);
+    return constrain(map((long)distance, 0, 1000, 200, 20), 20, 200);
+}
+
 void BMDevice::updateLightShow() {
     // Calculate effective speed (may be GPS-adjusted)
     uint16_t effectiveSpeed = calculateEffectiveSpeed();
@@ -642,12 +677,7 @@ void BMDevice::updateLightShow() {
         case LightSceneID::position_status:
             // GPS position status effect - use palette cycling with position-based speed
             if (gpsEnabled_ && deviceState_.positionAvailable) {
-                // Calculate distance from origin for effect variation
-                float distance = deviceState_.currentPosition.distance_from(deviceState_.origin);
-                // Use distance to modify effect speed (closer = faster cycling, further = slower)
-                // Map distance (0-1000m) to speed (200-20) - closer is faster
-                uint16_t positionSpeed = constrain(map((int)distance, 0, 1000, 200, 20), 20, 200);
-                lightShow_.palette_stream(positionSpeed, deviceState_.currentPalette, deviceState_.reverseStrip);
+                lightShow_.palette_stream(positionStatusSpeed(), deviceState_.currentPalette, deviceState_.reverseStrip);
             } else {
                 // Fallback to normal palette stream if no GPS
                 lightShow_.palette_stream(effectiveSpeed, deviceState_.currentPalette, deviceState_.reverseStrip);
@@ -760,12 +790,14 @@ void BMDevice::handleOriginFeature(const uint8_t* buffer, size_t length) {
 
 void BMDevice::handlePaletteFeature(const uint8_t* buffer, size_t length) {
     if (length > 1) {
-        if (length == 2) { // ID
+        // A 2-byte write is a numeric id only when the byte is in id range.
+        // Valid ids stop well below printable ASCII, so a byte past custom4 is
+        // a one-character name ("r") that would otherwise be unselectable.
+        if (length == 2 && buffer[1] <= (uint8_t)AvailablePalettes::custom4) {
             uint8_t paletteId = buffer[1];
             // isPaletteAvailable also turns down an empty custom slot, which
             // would otherwise select a palette that renders as nothing.
-            if (paletteId <= (uint8_t)AvailablePalettes::custom4 &&
-                lightShow_.isPaletteAvailable((AvailablePalettes)paletteId)) {
+            if (lightShow_.isPaletteAvailable((AvailablePalettes)paletteId)) {
                 setPalette((AvailablePalettes)paletteId);
                 Serial.print("[BMDevice] Palette set to ID: ");
                 Serial.println(paletteId);
@@ -1533,14 +1565,19 @@ void BMDevice::sendBasicStatusChunk() {
     doc["gps"] = gpsEnabled_;
     doc["posAvail"] = deviceState_.positionAvailable;
     doc["spdCur"] = deviceState_.currentSpeed;
-    
+    // The GPS speed-control settings ride along so the app's toggle and range
+    // reflect the device instead of only ever echoing the app's own writes.
+    doc["gpsLightSpdEn"] = deviceState_.gpsLightshowSpeedEnabled;
+    doc["gpsLowSpd"] = deviceState_.gpsLowSpeed;
+    doc["gpsTopSpd"] = deviceState_.gpsTopSpeed;
+
     if (deviceState_.positionAvailable) {
         Position& currentPos = const_cast<Position&>(deviceState_.currentPosition);
         JsonObject posObj = doc.createNestedObject("pos");
         posObj["lat"] = currentPos.latitude();
         posObj["lon"] = currentPos.longitude();
     }
-    
+
     // Essential info only (move others to device config chunk)
     doc["maxBri"] = defaults.maxBrightness;
     
