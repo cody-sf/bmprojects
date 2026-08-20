@@ -9,6 +9,15 @@
 
 #define MAX_PALETTE_SIZE 8
 
+// Rigs whose strips group several LEDs per addressable pixel (12 V WS2811
+// boards run 3-6 LEDs per IC) cover several times the physical distance per
+// pixel, so motion tuned on a dense wearable strip tears across them. Build
+// those targets with e.g. -DBM_MOTION_PERCENT=25 to slow every field effect's
+// motion to a quarter; frame rate and the app's speed slider are unaffected.
+#ifndef BM_MOTION_PERCENT
+#define BM_MOTION_PERCENT 100
+#endif
+
 enum LightSceneID : uint8_t
 {
     off,
@@ -38,7 +47,13 @@ enum LightSceneID : uint8_t
     aurora_borealis,
     lightning_storm,
     color_explosion,
-    spiral_galaxy
+    spiral_galaxy,
+    // Appended so every earlier effect keeps the id it already has on the wire.
+    noise_flow,
+    twinkle,
+    ripple,
+    cylon,
+    fireworks
 };
 
 enum AvailablePalettes : uint8_t
@@ -249,6 +264,44 @@ struct LightScene
             AvailablePalettes palette;
         } spiral_galaxy;
 
+        // New effects keep `duration` as the first member like everything
+        // above: apply_scene_updates(speed) and msUntilNextFrame() rely on the
+        // union members sharing that leading field.
+        struct
+        {
+            uint16_t duration;
+            uint8_t scale;
+            AvailablePalettes palette;
+        } noise_flow;
+
+        struct
+        {
+            uint16_t duration;
+            uint8_t density;
+            AvailablePalettes palette;
+        } twinkle;
+
+        struct
+        {
+            uint16_t duration;
+            uint8_t width;
+            AvailablePalettes palette;
+        } ripple;
+
+        struct
+        {
+            uint16_t duration;
+            uint8_t trail;
+            AvailablePalettes palette;
+        } cylon;
+
+        struct
+        {
+            uint16_t duration;
+            uint8_t size;
+            AvailablePalettes palette;
+        } fireworks;
+
     } scenes;
 };
 
@@ -285,7 +338,34 @@ public:
     void lightning_storm(uint16_t duration, uint8_t flash_intensity, uint16_t flash_frequency);
     void color_explosion(uint16_t duration, uint8_t explosion_size, AvailablePalettes palette);
     void spiral_galaxy(uint16_t duration, uint8_t spiral_arms, AvailablePalettes palette);
-    
+    void noise_flow(uint16_t duration, uint8_t scale, AvailablePalettes palette);
+    void twinkle(uint16_t duration, uint8_t density, AvailablePalettes palette);
+    void ripple(uint16_t duration, uint8_t width, AvailablePalettes palette);
+    void cylon(uint16_t duration, uint8_t trail, AvailablePalettes palette);
+    void fireworks(uint16_t duration, uint8_t size, AvailablePalettes palette);
+
+    /// Milliseconds until the active scene wants its next frame (0 = due now),
+    /// so the caller can sleep instead of spinning. A running transition
+    /// reports its own faster tick.
+    unsigned long msUntilNextFrame(unsigned long now) const;
+
+    /// Crossfade length when the scene or palette changes. 0 disables
+    /// transitions and restores hard cuts.
+    void setTransitionDuration(uint16_t ms) { transition_duration_ = ms; }
+
+    /// Force the next render pass to repaint even a static scene - used after
+    /// something outside the show (the find-me strobe) drove the strips.
+    void requestRepaint()
+    {
+        scene_changed_ = true;
+        last_render_time_ = 0;
+    }
+
+    /// Per-strip current budget in mA at 5 V (0 = no limiting). Applied at show
+    /// time via FastLED's power maths - a frame that would draw more is dimmed,
+    /// which both protects the supply and puts a hard ceiling on battery draw.
+    void setPowerBudgetPerStrip(uint32_t milliamps) { power_budget_ma_ = milliamps; }
+
     void apply_scene_updates(uint8_t brightness);
     void apply_scene_updates(uint16_t speed);
     void apply_scene_updates(LightScene &new_scene);
@@ -335,6 +415,33 @@ private:
     void setup_breathe_palette_(uint8_t dimness, CRGB color);
     void setup_spectrum_stream_();
     void setup_palette_stream_(bool direction);
+
+    // --- Crossfade transitions ---
+    // On a scene/palette change the outgoing frame is snapshotted and dissolved
+    // into the incoming effect. Effects keep rendering into their own buffers
+    // untouched (trail/heat state survives); the ticker blends snapshot+frame
+    // into the buffer, shows it, then restores the frame.
+    static constexpr unsigned long transition_tick_ms = 30;
+    void begin_transition_();
+    void transition_tick_(unsigned long now);
+    uint8_t transition_progress_(unsigned long now) const;
+    bool ensure_transition_buffers_();
+    /// The one place pixels leave the building. Applies the power budget and,
+    /// during a transition, defers to the ticker instead of showing directly.
+    void show_(CLEDController *controller, uint8_t brightness);
+    /// showColor for static scenes, but always mirrored into the LED buffer so
+    /// a transition starting later has a true picture of what was displayed.
+    void show_color_(CLEDController *controller, const CRGB &color, uint8_t brightness);
+    void show_now_(CLEDController *controller, uint8_t brightness);
+    CRGB *transition_snapshot_ = nullptr; // outgoing frame, all strips end to end
+    CRGB *transition_scratch_ = nullptr;  // one strip, for the blend/restore dance
+    size_t transition_total_leds_ = 0;
+    size_t transition_max_strip_ = 0;
+    bool transitioning_ = false;
+    unsigned long transition_start_ = 0;
+    unsigned long last_transition_tick_ = 0;
+    uint16_t transition_duration_ = 600;
+    uint32_t power_budget_ma_ = 0;
     std::vector<CLEDController *> led_controllers_;
     LightScene active_scene_;
     bool scene_changed_;
@@ -372,10 +479,54 @@ private:
     // wrapped every position past 255 back onto the front of the strip.
     uint16_t pulse_center_;        // Center position for pulse waves
     uint8_t matrix_drops_[64];     // Matrix rain drop positions (max 64 drops)
-    uint8_t plasma_offset_;        // Offset for plasma clouds
-    float noise_x_, noise_y_;      // For smooth noise effects
     uint16_t explosion_center_;    // Center of color explosion
-    uint8_t spiral_angle_;         // Current spiral rotation
+
+    // --- Smooth motion for field effects ---
+    // Effects whose pattern is a function of a phase (spiral, plasma, noise…)
+    // render at a fixed smooth cadence and advance that phase by elapsed time
+    // scaled by the speed knob. Tying motion to the frame period - the old
+    // scheme - meant a slow speed setting didn't slow the pattern, it strobed
+    // it at 5 fps.
+    /// Frame gate for field effects: 0 when no frame is due yet, otherwise the
+    /// elapsed ms since the last frame (clamped so stalls don't lurch).
+    uint16_t field_frame_elapsed_(unsigned long now, uint16_t duration);
+    static uint16_t field_frame_period_(uint16_t duration)
+    {
+        return duration < 16 ? 16 : (duration > 33 ? 33 : duration);
+    }
+    /// Advance the shared Q8.8 phase: `rate` phase units per frame of the old
+    /// scheme, so motion speed matches what each speed setting used to give.
+    /// `spatial` phases (positions, waves) honour BM_MOTION_PERCENT; temporal
+    /// ones (twinkle breathing) don't - a grouped-pixel strip changes how far
+    /// a pixel is, not how fast time passes.
+    void advance_phase_(uint16_t elapsed, uint16_t rate, uint16_t duration, bool spatial = true)
+    {
+        uint32_t step = (uint32_t)elapsed * rate * 256 / (duration ? duration : 1);
+        if (spatial)
+        {
+            step = step * BM_MOTION_PERCENT / 100;
+        }
+        phase_acc_ += step;
+    }
+    uint32_t phase_() const { return phase_acc_ >> 8; }
+    uint32_t phase_acc_ = 0;
+
+    // State for the ripple / cylon / fireworks effects (noise_flow and twinkle
+    // run entirely off the shared phase)
+    uint32_t cylon_pos_ = 0;       // Q8.8 for sub-pixel motion
+    int8_t cylon_dir_ = 1;
+    static constexpr uint8_t max_ripples = 6;
+    uint16_t ripple_center_[max_ripples] = {0};
+    uint16_t ripple_age_[max_ripples] = {0}; // 0 = free slot
+    uint8_t ripple_hue_[max_ripples] = {0};
+    static constexpr uint8_t max_sparks = 12;
+    uint8_t fw_stage_ = 0;           // 0 launch, 1 burst, 2 rest
+    uint32_t fw_pos_ = 0;            // rocket position, Q8.8
+    uint16_t fw_apex_ = 0;
+    unsigned long fw_next_launch_ = 0;
+    int32_t spark_pos_[max_sparks] = {0};  // Q8.8
+    int16_t spark_vel_[max_sparks] = {0};  // Q8.8 per ms
+    uint8_t spark_heat_[max_sparks] = {0};
 };
 
 #endif // LIGHTSHOW_H

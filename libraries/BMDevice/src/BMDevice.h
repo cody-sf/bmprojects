@@ -154,6 +154,9 @@ private:
     // Last time a GPS-driven show was re-evaluated against the current fix
     unsigned long lastGpsShowRefresh_ = 0;
 
+    // Find-me strobe deadline (0 = not identifying)
+    unsigned long identifyUntil_ = 0;
+
     // Power-off LED state, so the strips are cleared once instead of every loop
     bool ledsBlanked_;
 

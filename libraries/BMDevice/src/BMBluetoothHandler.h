@@ -72,6 +72,11 @@
 // Selection reuses BLE_FEATURE_PALETTE with the name "custom1".."custom4".
 #define BLE_FEATURE_SET_CUSTOM_PALETTE 0x7C
 #define BLE_FEATURE_DELETE_CUSTOM_PALETTE 0x7D
+
+// Find-me: strobe white for a few seconds so a lost light can flag itself
+// down, then put the show back. Works even while the light is powered off.
+// At 0x70+ like every new common code, clear of the per-device tables.
+#define BLE_FEATURE_IDENTIFY 0x7E
 // The name a person gives this device. Persisted, reported in status, and
 // folded into the advertised name so both apps can read it without a pairing
 // list of their own.

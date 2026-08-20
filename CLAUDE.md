@@ -41,6 +41,7 @@ pio run -e <env> -t clean
 
 ### Other projects
 `BTUmbrellaV3` and `BatteryCharger` each have a single `esp32dev` environment.
+`ElkRemote` has a single `cyd` environment.
 
 No automated test runner is used across any firmware project.
 
@@ -100,7 +101,7 @@ Controlled by `include/OTAConfig.h`. When `OTA_ENABLED=1`, `BMOTA` checks `OTA_V
 
 Three React Context providers wrap the app (see `App.tsx`):
 
-- **`BluetoothProvider`** — BLE scan/connect/disconnect, characteristic read/write, peripheral map, device status dispatch
+- **`BluetoothProvider`** — BLE scan/connect/disconnect, characteristic read/write, peripheral map, device status dispatch, standing auto-reconnect of every registered device (on an interval and on app foreground)
 - **`SettingsProvider`** — Persisted device state for all device types (backpack, umbrella, boofer, etc.) using AsyncStorage via `store/store.tsx`
 - **`WatchProvider`** — Apple Watch connectivity via `react-native-watch-connectivity`
 
@@ -132,6 +133,35 @@ Command bytes are written to the `features` characteristic. Encoding: single byt
 4. Create a new entry in `DEVICE_UUIDS`
 5. Add device state shape to `SettingsContext` and `SettingsProvider`
 6. Create a page under `pages/` and wire it into `NavigationTabs`
+
+### Third-party ELK light bars (device type `elk`)
+
+Off-the-shelf ELK-BLEDOM/BLEDDM Bluetooth LED bars (generic Amazon controllers)
+are controllable as their own device type. They are foreign hardware: stock
+`fff0` service, write characteristic `fff3`, fixed 9-byte frames
+(`7E 00 <cmd> <args> .. EF` — see `encodeElkCommand` in
+`providers/Bluetooth/commandCodec.ts`; the exact frames are pinned by tests and
+were verified against the hardware). They never report state, so the app's view
+of them is purely optimistic.
+
+Bars are identified by their `ELK-` name prefix — the `fff0` UUID is far too
+generic to scan for — and auto-adopted into the device registry on discovery.
+There is no setup screen: they cannot store an owner or a name, and clearing app
+storage costs nothing because rediscovery re-adopts them. A standing loop in
+`BluetoothProvider` reconnects every registered device without scanning — bars
+and our own hardware alike (connect-by-id pends on iOS / retries on Android
+until the device powers up); a scan is only needed to meet a device the app has
+never seen. The loop also re-kicks on app foreground, so paired devices are
+connecting before any device page mounts. All bars share one
+"Light Bars" tab (`pages/Elk/`), which exists only while at least one bar is
+connected.
+
+Their animations run on their own chip, so none of our effects apply. The mode
+list is `ELK_MODES` in `constants.ts` (names beyond the verified `0x87` follow
+community BLEDOM documentation — rename after eyeballing). A palette tap on the
+Light Bars page samples the gradient at one point per connected bar and deals
+the colours out across the group, which is the nearest thing a pile of
+single-colour bars has to playing a palette.
 
 ---
 
@@ -247,6 +277,39 @@ Two things this constrains:
   needs `requestMTU` on connect, which `BluetoothProvider` now does.
 - An empty slot is not selectable (`LightShow::isPaletteAvailable`); selecting
   one would render black. The encoder skips empty slots for the same reason.
+
+---
+
+## Elk Remote (`ElkRemote/`)
+
+Standalone controller for the third-party ELK light bars, on the 1-USB
+"Cheap Yellow Display" (ESP32-2432S028R / ILI9341, resistive XPT2046 touch on
+its own SPI bus). It is the app's Light Bars tab in hardware: BLE central
+only (NimBLE, `CONFIG_BT_NIMBLE_MAX_CONNECTIONS=9` so all 8 bars stay
+connected; NimBLE passes that through to the controller's `ble_max_conn`),
+no WiFi ever, and the same ELK frames - `src/ElkCodec.h` mirrors
+`encodeElkCommand` in `RNUmbrella/providers/Bluetooth/commandCodec.ts` byte
+for byte, so a frame change must land in both.
+
+`src/Palettes.h` is **generated** from the app's palette table - do not
+hand-edit:
+
+```bash
+node ElkRemote/scripts/generate-palettes.js   # after changing palettes in RNUmbrella/constants.ts
+```
+
+Behaviour is ported from `pages/Elk/Elk.tsx`: auto-adopt by `ELK-` name
+prefix, standing reconnect scan while any registered bar is missing,
+ensure-on before anything visual, and a palette tap deals one sampled colour
+per connected bar in label order (jittered for 3 or fewer). Bar labels and
+touch calibration live in NVS (Preferences namespace `elkremote`) because
+the bars can store nothing. All displayed state is optimistic - the bars
+never report.
+
+The TFT_eSPI pin map is passed entirely as `build_flags` (no library edits);
+the 2-USB / ST7789 CYD variant needs `-DST7789_DRIVER` and
+`-DTFT_INVERSION_ON` instead. The XPT2046 library comes from a GitHub tag in
+`lib_deps` because the registry package lacks a darwin_arm64 manifest.
 
 ---
 

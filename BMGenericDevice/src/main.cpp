@@ -150,6 +150,11 @@ void cycleEffect(int direction) {
         LightSceneID::aurora_borealis,   // 🌌 Northern lights
         LightSceneID::color_explosion,   // 💥 Explosive colors
         LightSceneID::spiral_galaxy,     // 🌌 Rotating spirals
+        LightSceneID::noise_flow,        // 🌊 Drifting Perlin noise
+        LightSceneID::twinkle,           // ✨ Fairy-light twinkles
+        LightSceneID::ripple,            // 💧 Expanding rings
+        LightSceneID::cylon,             // 👁️ Bouncing eye with trail
+        LightSceneID::fireworks,         // 🎆 Rockets and bursts
     };
     
     static const int totalCuratedEffects = sizeof(curatedEffects) / sizeof(curatedEffects[0]);
@@ -455,6 +460,15 @@ void setup() {
         Serial.println("Failed to initialize BMDevice!");
         while (1);
     }
+
+#ifdef BM_MAX_MILLIAMPS_PER_STRIP
+    // Per-strip current ceiling at 5 V (strips are power-injected per strip, so
+    // per-strip is the budget that means something). A frame that would draw
+    // more is dimmed by FastLED's power maths - protects the pack and caps the
+    // worst-case battery draw. Enable per env: -DBM_MAX_MILLIAMPS_PER_STRIP=2000
+    device.getLightShow().setPowerBudgetPerStrip(BM_MAX_MILLIAMPS_PER_STRIP);
+    Serial.printf("Power budget: %d mA per strip @ 5V\n", BM_MAX_MILLIAMPS_PER_STRIP);
+#endif
 
 #if OTA_ENABLED
     static char pendingSsid[33] = {0};

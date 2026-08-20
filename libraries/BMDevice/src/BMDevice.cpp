@@ -129,8 +129,11 @@ void BMDevice::setLocationService(LocationService* locationService) {
 
 bool BMDevice::begin() {
     Serial.begin(115200);
-    delay(2000);
-    
+    // Just long enough for a freshly opened monitor to catch the banner. The
+    // old two-second pause was two seconds of dark, full-power boot on every
+    // battery in the field.
+    delay(250);
+
     // Initialize defaults system
     if (!defaults_.begin()) {
         Serial.println("[BMDevice] Failed to initialize defaults!");
@@ -194,6 +197,21 @@ void BMDevice::loop() {
         startChunkedStatusUpdate();
     }
 
+    // Find-me strobe: overrides everything, including the powered-off blank,
+    // because a lost light is usually a switched-off light.
+    if (identifyUntil_ != 0) {
+        if (millis() < identifyUntil_) {
+            bool flashOn = (millis() / 150) % 2 == 0;
+            FastLED.showColor(flashOn ? CRGB::White : CRGB::Black, flashOn ? 96 : 0);
+            delay(10);
+            return;
+        }
+        identifyUntil_ = 0;
+        // Put the show - or the dark - back the way it was.
+        lightShow_.requestRepaint();
+        ledsBlanked_ = false;
+    }
+
     // Handle power state
     if (!deviceState_.power) {
         // Blank once on the transition. Re-clocking every strip on every loop
@@ -230,10 +248,13 @@ void BMDevice::loop() {
     // Render light show
     lightShow_.render();
 
-    // Frames are gated on millis() inside render(), so this only adds <=1 ms of
-    // jitter to a >=5 ms frame period - invisible - while handing the CPU to
-    // the idle task instead of spinning this loop flat out.
-    delay(1);
+    // Sleep until the show wants its next frame (a running transition reports
+    // its own faster tick), capped at 10 ms so BLE writes and encoder input
+    // are still picked up promptly. Frames are gated on millis() inside
+    // render(), so this only trims idle spinning - it cannot slow a show down.
+    unsigned long idleMs = lightShow_.msUntilNextFrame(millis());
+    if (idleMs > 10) idleMs = 10;
+    delay(idleMs > 0 ? idleMs : 1);
 }
 
 void BMDevice::markStatusDirty() {
@@ -366,11 +387,29 @@ void BMDevice::handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size
     // Handle standard features
     switch (feature) {
         case BLE_FEATURE_REQUEST_STATUS:
-            // App asked for a refresh (page opened, poll tick). Answer now
-            // rather than waiting on the settle window.
+            // [0x02] alone asks for the full chunk burst. [0x02][0x01] asks
+            // for just the first registered chunk - the live one (basicStatus
+            // here, "batt" on the charger) - which is what the app's interval
+            // poll uses: one notification instead of the whole burst.
+            if (length >= 2 && buffer[1] == 0x01) {
+                if (!statusChunks_.empty()) {
+                    statusChunks_[0].sendFunction();
+                } else {
+                    sendStatusUpdate();
+                }
+                return;
+            }
+            // Full refresh (page opened). Answer now rather than waiting on
+            // the settle window.
             statusDirty_ = true;
             statusDirtyAt_ = 0;
             lastStatusSentAt_ = 0;
+            return;
+        case BLE_FEATURE_IDENTIFY:
+            // Strobe for 5 s; the app re-sends while its Find screen is open,
+            // so the strobe dies on its own if the phone walks away.
+            identifyUntil_ = millis() + 5000;
+            Serial.println("[BMDevice] Identify: find-me strobe for 5s");
             return;
         case BLE_FEATURE_POWER:
             handlePowerFeature(buffer, length);
@@ -657,6 +696,24 @@ void BMDevice::updateLightShow() {
         case LightSceneID::spiral_galaxy:
             lightShow_.spiral_galaxy(effectiveSpeed, deviceState_.spiralArms, deviceState_.currentPalette);
             break;
+        // The new effects reuse existing effect-parameter fields (and so their
+        // existing BLE codes): scale rides cloudScale, density rides dropRate,
+        // ripple width rides waveWidth, the cylon trail rides trailLength.
+        case LightSceneID::noise_flow:
+            lightShow_.noise_flow(effectiveSpeed, deviceState_.cloudScale, deviceState_.currentPalette);
+            break;
+        case LightSceneID::twinkle:
+            lightShow_.twinkle(effectiveSpeed, deviceState_.dropRate, deviceState_.currentPalette);
+            break;
+        case LightSceneID::ripple:
+            lightShow_.ripple(effectiveSpeed, deviceState_.waveWidth, deviceState_.currentPalette);
+            break;
+        case LightSceneID::cylon:
+            lightShow_.cylon(effectiveSpeed, deviceState_.trailLength, deviceState_.currentPalette);
+            break;
+        case LightSceneID::fireworks:
+            lightShow_.fireworks(effectiveSpeed, deviceState_.explosionSize, deviceState_.currentPalette);
+            break;
         case LightSceneID::speedometer:
             // GPS speedometer effect - blend colors based on current speed
             if (gpsEnabled_ && deviceState_.positionAvailable) {
@@ -822,7 +879,7 @@ void BMDevice::handleEffectFeature(const uint8_t* buffer, size_t length) {
     if (length > 1) {
         if (length == 2) { // ID
             uint8_t effectId = buffer[1];
-            if (effectId <= (uint8_t)LightSceneID::spiral_galaxy) {
+            if (effectId <= (uint8_t)LightSceneID::fireworks) {
                 Serial.print("[BMDevice] handleEffectFeature: Received effect ID: ");
                 Serial.println(effectId);
                 setEffect((LightSceneID)effectId);

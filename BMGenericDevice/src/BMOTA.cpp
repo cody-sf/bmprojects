@@ -336,8 +336,26 @@ void BMOTA::loop() {
             break;
         case CONNECTED: {
             unsigned long now = millis();
-            bool firstCheck = (lastCheckTime_ == 0);
-            bool intervalElapsed = (OTA_CHECK_INTERVAL_MS > 0 && now - lastCheckTime_ >= OTA_CHECK_INTERVAL_MS);
+            // A locally-flashed build reports "dev", which never matches the
+            // released version.txt - an automatic check would immediately
+            // "update" it back to the old release, silently erasing whatever
+            // was just flashed for testing. Dev builds only check when the app
+            // explicitly asks (which is then a deliberate return to a release).
+            bool devBuild = (strcmp(FIRMWARE_VERSION, "dev") == 0);
+            if (devBuild && lastCheckTime_ == 0 && !forceCheckPending_) {
+                static bool announced = false;
+                if (!announced) {
+                    announced = true;
+                    Serial.println("[OTA] Dev build - automatic update checks disabled (app's Check for Updates still works)");
+#if !OTA_KEEP_WIFI_ALIVE
+                    // Hold the link open for espota pushes before dropping off.
+                    lingerUntil_ = now + OTA_MANUAL_LINGER_MS;
+#endif
+                }
+            }
+            bool firstCheck = (lastCheckTime_ == 0) && !devBuild;
+            bool intervalElapsed = !devBuild &&
+                (OTA_CHECK_INTERVAL_MS > 0 && now - lastCheckTime_ >= OTA_CHECK_INTERVAL_MS);
             if (firstCheck || intervalElapsed || forceCheckPending_) {
                 lastCheckWasManual_ = forceCheckPending_;
                 forceCheckPending_ = false;
