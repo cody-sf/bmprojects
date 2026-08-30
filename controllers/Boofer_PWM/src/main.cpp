@@ -18,7 +18,7 @@ void syncBluetoothSettings();
 void syncQuickStatus();
 void saveSettings();
 void loadSettings();
-void restoreDefaults();x
+void restoreDefaults();
 void checkValveTimer();
 
 static Device boofer;
@@ -117,6 +117,23 @@ unsigned long valveOpenTime = 0;
 int valveTimeout = 5000; // Default 5 seconds - used for timed releases and safety
 int valveActiveDuration = 0; // 0 = indefinite (button hold), >0 = timed release
 
+// Reads the int32 payload behind the feature byte. False when the write is too
+// short to carry one - memcpy would otherwise read past the end of the buffer
+// (only 0x3E ever checked; a truncated write to any other int command landed
+// whatever bytes happened to follow).
+bool readIntArg(const std::string &value, unsigned int dataLength, int &out)
+{
+  if (dataLength < 1 + sizeof(int32_t))
+  {
+    Serial.println("Ignoring int command - insufficient data");
+    return false;
+  }
+  int32_t v = 0;
+  memcpy(&v, value.data() + 1, sizeof(v));
+  out = v;
+  return true;
+}
+
 void featureCallback(BLEDevice central, BLECharacteristic characteristic)
 {
   const uint8_t *buffer = commandCharacteristic.value();
@@ -182,103 +199,123 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
 
     case 0x35: // Short Boof Duration
     {
-      int d = 0;
-      memcpy(&d, value.data() + 1, sizeof(int));
-      shortBurst = d;
-      Serial.print("Short Boof Duration: ");
-      Serial.println(shortBurst);
+      int d;
+      if (readIntArg(value, dataLength, d))
+      {
+        shortBurst = d;
+        Serial.print("Short Boof Duration: ");
+        Serial.println(shortBurst);
+      }
     }
     break;
 
     case 0x36: // Long Boof Duration
     {
-      int l = 0;
-      memcpy(&l, value.data() + 1, sizeof(int));
-      longBurst = l;
-      Serial.print("Long Boof Duration: ");
-      Serial.println(longBurst);
+      int l;
+      if (readIntArg(value, dataLength, l))
+      {
+        longBurst = l;
+        Serial.print("Long Boof Duration: ");
+        Serial.println(longBurst);
+      }
     }
     break;
 
     case 0x37: // stage1Start
     {
-      int v = 0;
-      memcpy(&v, value.data() + 1, sizeof(int));
-      stage1Start = v;
-      Serial.print("Updated stage1Start: ");
-      Serial.println(stage1Start);
+      int v;
+      if (readIntArg(value, dataLength, v))
+      {
+        stage1Start = v;
+        Serial.print("Updated stage1Start: ");
+        Serial.println(stage1Start);
+      }
     }
     break;
 
     case 0x42: // stage1End
     {
-      int v = 0;
-      memcpy(&v, value.data() + 1, sizeof(int));
-      stage1End = v;
-      stage2Start = v + 1;
-      Serial.print("Updated stage1End: ");
-      Serial.println(stage1End);
+      int v;
+      if (readIntArg(value, dataLength, v))
+      {
+        stage1End = v;
+        stage2Start = v + 1;
+        Serial.print("Updated stage1End: ");
+        Serial.println(stage1End);
+      }
     }
     break;
 
     case 0x38: // stage1Interval
     {
-      int v = 0;
-      memcpy(&v, value.data() + 1, sizeof(int));
-      stage1WI = v;
-      Serial.print("Updated stage1WI: ");
-      Serial.println(stage1WI);
+      int v;
+      if (readIntArg(value, dataLength, v))
+      {
+        stage1WI = v;
+        Serial.print("Updated stage1WI: ");
+        Serial.println(stage1WI);
+      }
     }
     break;
 
     case 0x39: // stage2End
     {
-      int v = 0;
-      memcpy(&v, value.data() + 1, sizeof(int));
-      stage2End = v;
-      stage3Start = v + 1;
-      Serial.print("Updated stage2End: ");
-      Serial.println(stage2End);
+      int v;
+      if (readIntArg(value, dataLength, v))
+      {
+        stage2End = v;
+        stage3Start = v + 1;
+        Serial.print("Updated stage2End: ");
+        Serial.println(stage2End);
+      }
     }
     break;
 
     case 0x3A: // stage2Interval
     {
-      int v = 0;
-      memcpy(&v, value.data() + 1, sizeof(int));
-      stage2WI = v;
-      Serial.print("Updated stage2WI: ");
-      Serial.println(stage2WI);
+      int v;
+      if (readIntArg(value, dataLength, v))
+      {
+        stage2WI = v;
+        Serial.print("Updated stage2WI: ");
+        Serial.println(stage2WI);
+      }
     }
     break;
 
     case 0x3B: // stage3End
     {
-      int v = 0;
-      memcpy(&v, value.data() + 1, sizeof(int));
-      stage3End = v;
-      Serial.print("Updated stage3End: ");
-      Serial.println(stage3End);
+      int v;
+      if (readIntArg(value, dataLength, v))
+      {
+        stage3End = v;
+        Serial.print("Updated stage3End: ");
+        Serial.println(stage3End);
+      }
     }
     break;
 
     case 0x3C: // stage3Interval
     {
-      int v = 0;
-      memcpy(&v, value.data() + 1, sizeof(int));
-      stage3WI = v;
-      Serial.print("Updated stage3WI: ");
-      Serial.println(stage3WI);
+      int v;
+      if (readIntArg(value, dataLength, v))
+      {
+        stage3WI = v;
+        Serial.print("Updated stage3WI: ");
+        Serial.println(stage3WI);
+      }
     }
     break;
 
     case 0x3D: // stageDelay
     {
-      int v = 0;
-      memcpy(&v, value.data() + 1, sizeof(int));
-      stageDelay = v;
-      Serial.print("Updated stageDelay: ");
-      Serial.println(stageDelay);
+      int v;
+      if (readIntArg(value, dataLength, v))
+      {
+        stageDelay = v;
+        Serial.print("Updated stageDelay: ");
+        Serial.println(stageDelay);
+      }
     }
     break;
 
@@ -343,12 +380,14 @@ void featureCallback(BLEDevice central, BLECharacteristic characteristic)
 
     case 0x41: // Set Valve Timeout
     {
-      int timeout = 0;
-      memcpy(&timeout, value.data() + 1, sizeof(int));
-      valveTimeout = timeout;
-      Serial.print("Valve timeout set to: ");
-      Serial.print(valveTimeout);
-      Serial.println(" ms");
+      int timeout;
+      if (readIntArg(value, dataLength, timeout))
+      {
+        valveTimeout = timeout;
+        Serial.print("Valve timeout set to: ");
+        Serial.print(valveTimeout);
+        Serial.println(" ms");
+      }
       break;
     }
     case 0x30: // set_owner
@@ -611,6 +650,18 @@ void blePeripheralDisconnectHandler(BLEDevice central)
   Serial.print("Disconnected event, central: ");
   Serial.println(central.address());
   deviceConnected = false;
+
+  // A valve opened over BLE must not outlive the link that opened it - the
+  // safety timeout would close it anyway, but that can be seconds of flame
+  // with nobody holding a controller. A physical button hold is exempt.
+  if (valveOpen && !valveOpenedByButton)
+  {
+    Serial.println("Central lost with valve open - closing valve");
+    digitalWrite(SOLENOID_PIN, LOW);
+    valveOpen = false;
+    valveOpenTime = 0;
+    valveActiveDuration = 0;
+  }
 }
 
 void sendStatusUpdate()
