@@ -8,3 +8,7 @@
 # (a registered git worktree is a second copy of the repo, not repo content).
 .claude/settings.local.json
 .claude/worktrees/
+
+# Python bytecode caches (map generator scripts)
+__pycache__/
+*.pyc
