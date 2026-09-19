@@ -22,6 +22,7 @@ BMDevice::BMDevice(const char* deviceName, const char* serviceUUID, const char* 
       statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL),
       statusDirty_(false), statusDirtyAt_(0), lastStatusSentAt_(0), lastFingerprintAt_(0),
       stateFingerprint_(0), wasSubscribed_(false), ledsBlanked_(false),
+      lastSyncServiceAt_(0),
       statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0),
       dynamicNaming_(false) {
 
@@ -51,6 +52,7 @@ BMDevice::BMDevice(const char* serviceUUID, const char* featuresUUID, const char
       statusUpdateInterval_(DEFAULT_BT_REFRESH_INTERVAL),
       statusDirty_(false), statusDirtyAt_(0), lastStatusSentAt_(0), lastFingerprintAt_(0),
       stateFingerprint_(0), wasSubscribed_(false), ledsBlanked_(false),
+      lastSyncServiceAt_(0),
       statusUpdateState_(STATUS_IDLE), statusUpdateTimer_(0), currentChunkIndex_(0),
       dynamicNaming_(true) {
 
@@ -146,6 +148,14 @@ bool BMDevice::begin() {
     } else {
         Serial.println("[BMDevice] Using factory defaults");
     }
+
+    // Multi-device sync: same-owner devices trade their look over ESP-NOW
+    // broadcast. serviceSync() re-reads the owner every pass, so a BLE owner
+    // change moves the device between groups without a reboot.
+    sync_.configure(&deviceClock_);
+    sync_.setApplyCallback([this](const BMSyncState& state) {
+        this->applySyncState(state);
+    });
     
     // Handle dynamic naming
     if (dynamicNaming_) {
@@ -174,6 +184,14 @@ bool BMDevice::begin() {
     // Update light show with initial state
     updateLightShow();
     
+    // Apply each registered strip's saved grouping and brightness ceiling
+    // (sketch-added strips are in before begin() runs; the NVRAM-configured
+    // ones were just added).
+    for (size_t i = 0; i < registeredStripCount_; i++) {
+        lightShow_.setStripGroupSize(i, (uint8_t)defaults_.getStripGroupSize((int)i));
+        lightShow_.setStripMaxBrightness(i, (uint8_t)defaults_.getStripMaxBrightness((int)i));
+    }
+
     // Initialize default status chunks for all devices
     initializeDefaultStatusChunks();
     
@@ -188,6 +206,10 @@ void BMDevice::loop() {
     }
 
     bluetoothHandler_.poll();
+
+    // Sync runs before the powered-off early return: an off device still has
+    // to broadcast its farewell packet and wind the radio down.
+    serviceSync();
 
     // Handle chunked status updates
     handleChunkedStatusUpdate();
@@ -212,15 +234,90 @@ void BMDevice::loop() {
         ledsBlanked_ = false;
     }
 
+    // Feedback blink (flashFeedback): like the find-me strobe it overrides
+    // the powered-off blank - a button press on a dark device should still
+    // show where it landed.
+    if (feedbackBlinks_ != 0) {
+        unsigned long elapsed = millis() - feedbackStartAt_;
+        if (elapsed < feedbackBlinks_ * 240UL) {
+            bool flashOn = (elapsed / 120) % 2 == 0;
+            FastLED.showColor(flashOn ? feedbackColor_ : CRGB::Black, flashOn ? 96 : 0);
+            delay(10);
+            return;
+        }
+        feedbackBlinks_ = 0;
+        lightShow_.requestRepaint();
+        ledsBlanked_ = false;
+    }
+
+    // Wiring test, bypassing maps, render orders and grids. Two alternating
+    // phases: a rainbow along the raw LED chain (hue = chain index) shows the
+    // macro layout, and a corner pattern - the first three 8-LED runs in red /
+    // green / blue, each run's first LED white - shows where the chain starts
+    // and whether the runs zigzag, which the rainbow's 11-degree in-column
+    // drift cannot. Overrides the powered-off blank like the strobe - it's a
+    // bench diagnostic. Reading guide: generate_matrix_map.py.
+    if (matrixTestUntil_ != 0) {
+        if (millis() < matrixTestUntil_) {
+            // Three rotating phases: chain rainbow (macro layout), corner
+            // runs (start corner + zigzag), and the grid test card (the whole
+            // display pipeline, no app content involved).
+            uint8_t phase = (millis() / 4000) % 3;
+            if (phase == 2) {
+                lightShow_.renderMatrixTestCard(48);
+                delay(50);
+                return;
+            }
+            bool cornerPhase = phase == 1;
+            for (int i = 0; i < FastLED.count(); i++) {
+                CLEDController &ctrl = FastLED[i];
+                CRGB *leds = ctrl.leds();
+                for (int n = 0; n < ctrl.size(); n++) {
+                    if (!cornerPhase) {
+                        leds[n] = CHSV((uint8_t)n, 255, 255);
+                    } else if (n < 24) {
+                        leds[n] = (n % 8 == 0) ? CRGB(255, 255, 255)
+                                               : (n < 8 ? CRGB(255, 0, 0)
+                                                        : (n < 16 ? CRGB(0, 255, 0)
+                                                                  : CRGB(0, 0, 255)));
+                    } else {
+                        leds[n] = CRGB(4, 4, 8);
+                    }
+                }
+                // Modest brightness: a full-panel rainbow at play brightness
+                // is a power spike, and the camera reads hues better dim.
+                ctrl.showLeds(48);
+            }
+            delay(50);
+            return;
+        }
+        matrixTestUntil_ = 0;
+        lightShow_.requestRepaint();
+        ledsBlanked_ = false;
+    }
+
     // Handle power state
     if (!deviceState_.power) {
-        // Blank once on the transition. Re-clocking every strip on every loop
-        // burns the CPU and the LED data lines for no visible difference
-        // (8 x 450 LEDs is >100 ms of blocking output per pass).
-        if (!ledsBlanked_) {
+        // Blank on the transition, then re-clock the dark frame once a second
+        // - not every loop, which burns the CPU and the LED data lines for no
+        // visible difference (8 x 450 LEDs is >100 ms of blocking output).
+        //
+        // The blank used to be one parallel FastLED.show(), the only place
+        // strips ever clocked out concurrently - the render path shows them
+        // one at a time. With WiFi (and now MQTT) busy, RMT interrupt latency
+        // during that parallel burst could cost a channel its frame, and a
+        // strip that misses the one-shot blank holds its last frame until the
+        // next power-on: the hotel sign's VACANCY strip stayed lit at full
+        // every time. Sequential output plus the periodic re-clock means a
+        // missed frame - or a noise-latched pixel during a long off stretch -
+        // goes dark within a second.
+        if (!ledsBlanked_ || millis() - lastBlankAt_ >= 1000) {
             FastLED.clear();
-            FastLED.show();
+            for (int i = 0; i < FastLED.count(); i++) {
+                FastLED[i].showLeds(0);
+            }
             ledsBlanked_ = true;
+            lastBlankAt_ = millis();
         }
         // Off but reachable: nothing to render, so poll the radio at a relaxed
         // pace instead of spinning. Well inside a BLE connection interval.
@@ -260,6 +357,71 @@ void BMDevice::loop() {
 void BMDevice::markStatusDirty() {
     statusDirty_ = true;
     statusDirtyAt_ = millis();
+}
+
+void BMDevice::serviceSync() {
+    unsigned long now = millis();
+    if (now - lastSyncServiceAt_ < 100) {
+        return;
+    }
+    lastSyncServiceAt_ = now;
+
+    sync_.setGroup(defaults_.getCurrentDefaults().owner);
+
+    BMSyncState current;
+    current.power = deviceState_.power ? 1 : 0;
+    // Brightness syncs as a fraction of each device's *own* max, not an
+    // absolute level: a pack capped at 100% and a hat capped at 40% both at
+    // "half" read 50 on the wire, so the group dims together proportionally
+    // instead of every device slamming into the weakest cap.
+    int maxPercent = defaults_.getCurrentDefaults().maxBrightness;
+    if (maxPercent <= 0) maxPercent = 100;
+    int absPercent = brightnessLevelToPercent(deviceState_.brightness);
+    current.brightnessPercent = (uint8_t)constrain((absPercent * 100 + maxPercent / 2) / maxPercent, 0, 100);
+    current.speed = deviceState_.speed;
+    current.reverse = deviceState_.reverseStrip ? 1 : 0;
+    current.effect = (uint8_t)deviceState_.currentEffect;
+    current.palette = (uint8_t)deviceState_.currentPalette;
+
+    // The radio only listens while the lights are on: always-on ESP-NOW
+    // receive costs tens of mA, which is real money on a battery but noise
+    // next to a running show. A switched-off device rejoins on power-up.
+    sync_.service(current, syncAvailable_ && defaults_.isSyncEnabled() && deviceState_.power);
+}
+
+void BMDevice::applySyncState(const BMSyncState& state) {
+    deviceState_.power = state.power != 0;
+
+    // The wire carries brightness as a fraction of the sender's max; scale it
+    // by this device's own max so every device sits at the same *relative*
+    // level and none exceeds its cap.
+    DeviceDefaults defaults = defaults_.getCurrentDefaults();
+    int maxPercent = defaults.maxBrightness;
+    if (maxPercent <= 0) maxPercent = 100;
+    int absPercent = ((int)state.brightnessPercent * maxPercent + 50) / 100;
+    setBrightness(brightnessPercentToLevel(absPercent));
+
+    deviceState_.speed = constrain((int)state.speed, 5, 200);
+    deviceState_.reverseStrip = state.reverse != 0;
+
+    if (state.effect <= (uint8_t)LIGHT_SCENE_ID_MAX) {
+        LightSceneID fx = (LightSceneID)state.effect;
+        // An old-firmware sender may still broadcast a display id; the
+        // matrix display is local content now, not a look to adopt.
+        if (fx != LightSceneID::panel_text && fx != LightSceneID::panel_words &&
+            fx != LightSceneID::panel_bitmap && fx != LightSceneID::panel_anim) {
+            deviceState_.currentEffect = fx;
+        }
+    }
+    // isPaletteAvailable also turns down a custom slot this device has not
+    // been dealt - the rest of the packet still applies.
+    if (state.palette <= (uint8_t)AvailablePalettes::custom4 &&
+        lightShow_.isPaletteAvailable((AvailablePalettes)state.palette)) {
+        deviceState_.currentPalette = (AvailablePalettes)state.palette;
+    }
+
+    updateLightShow();
+    markStatusDirty();  // the connected phone should see the group's change
 }
 
 // Cheap rolling hash over everything the app displays. Deliberately excludes
@@ -361,6 +523,26 @@ void BMDevice::setBrightness(int brightness) {
 }
 
 void BMDevice::setEffect(LightSceneID effect) {
+    // The display "effects" became the matrix overlay (0x89). Every path that
+    // sets an effect funnels through here - BLE by id, BLE by name, boot
+    // defaults - so an old client (or an old NVRAM default) that selects one
+    // switches the display on instead, and the running effect stays put.
+    switch (effect) {
+        case LightSceneID::panel_text:
+            setMatrixDisplay(MATRIX_DISPLAY_TEXT);
+            return;
+        case LightSceneID::panel_words:
+            setMatrixDisplay(MATRIX_DISPLAY_WORDS);
+            return;
+        case LightSceneID::panel_bitmap:
+            setMatrixDisplay(MATRIX_DISPLAY_BITMAP);
+            return;
+        case LightSceneID::panel_anim:
+            setMatrixDisplay(MATRIX_DISPLAY_ANIM);
+            return;
+        default:
+            break;
+    }
     deviceState_.currentEffect = effect;
     updateLightShow();
 }
@@ -368,6 +550,31 @@ void BMDevice::setEffect(LightSceneID effect) {
 void BMDevice::setPalette(AvailablePalettes palette) {
     deviceState_.currentPalette = palette;
     updateLightShow();
+}
+
+void BMDevice::setMatrixDisplay(uint8_t mode) {
+    if (mode > MATRIX_DISPLAY_MAX) {
+        mode = MATRIX_DISPLAY_OFF;
+    }
+    defaults_.setMatrixDisplay(mode);
+    lightShow_.setMatrixDisplay(mode);
+    Serial.printf("[BMDevice] Matrix display mode set to %u\n", mode);
+    markStatusDirty();
+}
+
+void BMDevice::flashFeedback(const CRGB& color, uint8_t blinks) {
+    feedbackColor_ = color;
+    feedbackBlinks_ = blinks;
+    feedbackStartAt_ = millis();
+}
+
+void BMDevice::setMatrixSpeed(uint16_t ms) {
+    defaults_.setMatrixSpeed(ms);
+    // The defaults setter clamps; feed the show the same value it stored.
+    lightShow_.setMatrixSpeed(defaults_.getMatrixSpeed());
+    Serial.printf("[BMDevice] Matrix display speed set to %u ms\n",
+                  defaults_.getMatrixSpeed());
+    markStatusDirty();
 }
 
 void BMDevice::setCustomFeatureHandler(std::function<bool(uint8_t, const uint8_t*, size_t)> handler) {
@@ -488,6 +695,70 @@ void BMDevice::handleFeatureCommand(uint8_t feature, const uint8_t* buffer, size
         case BLE_FEATURE_SET_GPS_LIGHTSHOW_SPEED_ENABLED:
             handleSetGPSLightshowSpeedEnabledFeature(buffer, length);
             break;
+        case BLE_FEATURE_SET_SYNC_ENABLED:
+            handleSetSyncEnabledFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_STRIP_GROUP:
+            handleSetStripGroupFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_STRIP_BRIGHTNESS:
+            handleSetStripBrightnessFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_MARQUEE_TEXT:
+            handleSetMarqueeTextFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_MATRIX_BITMAP:
+            handleSetMatrixBitmapFeature(buffer, length);
+            break;
+        case BLE_FEATURE_CLEAR_MATRIX_BITMAP:
+            handleClearMatrixBitmapFeature(buffer, length);
+            break;
+        case BLE_FEATURE_MATRIX_TEST:
+            matrixTestUntil_ = millis() + 30000;
+            Serial.println("[BMDevice] Matrix wiring test: chain rainbow for 30s");
+            return;
+        case BLE_FEATURE_SET_TEXT_STYLE:
+            if (length >= 2) {
+                uint8_t style = buffer[1] ? 1 : 0;
+                defaults_.setTextStyle(style);
+                // Live, like the text itself - the next frame renders bold.
+                lightShow_.setTextStyle(style);
+                Serial.printf("[BMDevice] Text style set to %s\n", style ? "bold" : "normal");
+                markStatusDirty();
+            }
+            return;
+        case BLE_FEATURE_SET_TEXT_FILL:
+            if (length >= 2) {
+                uint8_t fill = buffer[1] < 4 ? buffer[1] : 0;
+                defaults_.setTextFill(fill);
+                // Live, like the style - the next frame renders the new fill.
+                lightShow_.setTextFill(fill);
+                Serial.printf("[BMDevice] Text fill set to %u\n", fill);
+                markStatusDirty();
+            }
+            return;
+        case BLE_FEATURE_SET_ANIM_FRAME:
+            handleSetAnimFrameFeature(buffer, length);
+            break;
+        case BLE_FEATURE_CLEAR_ANIM_FRAMES:
+            handleClearAnimFramesFeature(buffer, length);
+            break;
+        case BLE_FEATURE_SET_MATRIX_DISPLAY:
+            if (length >= 2) {
+                setMatrixDisplay(buffer[1]);
+            }
+            return;
+        case BLE_FEATURE_SET_MATRIX_SPEED:
+            if (length >= 2) {
+                // int32 LE from the apps; a bare byte still parses (LSB
+                // first), which keeps hand-rolled clients honest.
+                int value = 0;
+                memcpy(&value, buffer + 1, min(length - 1, sizeof(int)));
+                if (value > 0) {
+                    setMatrixSpeed((uint16_t)min(value, 0xFFFF));
+                }
+            }
+            return;
         
         // Generic device configuration commands
         case BLE_FEATURE_SET_OWNER:
@@ -654,7 +925,49 @@ uint16_t BMDevice::positionStatusSpeed() {
 void BMDevice::updateLightShow() {
     // Calculate effective speed (may be GPS-adjusted)
     uint16_t effectiveSpeed = calculateEffectiveSpeed();
-    
+
+    // Keep the matrix display overlay's styling in step: the marquee's glyph
+    // fills draw from the current palette and the scroll follows the
+    // direction toggle, even though the display itself is not an effect.
+    lightShow_.setMatrixStyle(deviceState_.currentPalette, !deviceState_.reverseStrip);
+
+    // The chevron and panel effects need panel geometry; the straight-strip
+    // fallback they'd get on unmapped rigs reads as noise. Render the nearest
+    // 1D look instead while *reporting* the panel id unchanged, so a synced
+    // group can agree on one effect even when only the bike can draw it
+    // properly.
+    if (!lightShow_.hasPanelMap()) {
+        switch (deviceState_.currentEffect) {
+            case LightSceneID::chevron_wave:
+            case LightSceneID::chevron_chase:
+            case LightSceneID::chevron_burst:
+            case LightSceneID::chevron_glow:
+            case LightSceneID::chevron_eq:
+                lightShow_.color_explosion(effectiveSpeed, deviceState_.explosionSize, deviceState_.currentPalette);
+                return;
+            case LightSceneID::panel_waves:
+                lightShow_.plasma_clouds(effectiveSpeed, deviceState_.cloudScale, deviceState_.currentPalette);
+                return;
+            case LightSceneID::panel_fire:
+                lightShow_.fire_plasma(effectiveSpeed, deviceState_.heatVariance, deviceState_.currentPalette);
+                return;
+            case LightSceneID::panel_rain:
+                lightShow_.matrix_rain(effectiveSpeed, deviceState_.dropRate, deviceState_.effectColor);
+                return;
+            case LightSceneID::panel_spin:
+                lightShow_.spiral_galaxy(effectiveSpeed, deviceState_.spiralArms, deviceState_.currentPalette);
+                return;
+            case LightSceneID::starfield:
+                lightShow_.meteor_shower(effectiveSpeed, deviceState_.meteorCount, deviceState_.trailLength, deviceState_.currentPalette);
+                return;
+            case LightSceneID::panel_puddle:
+                lightShow_.matrix_rain(effectiveSpeed, deviceState_.dropRate, deviceState_.effectColor);
+                return;
+            default:
+                break;
+        }
+    }
+
     // Map LightSceneID to LightShow effect
     switch (deviceState_.currentEffect) {
         case LightSceneID::palette_stream:
@@ -713,6 +1026,69 @@ void BMDevice::updateLightShow() {
             break;
         case LightSceneID::fireworks:
             lightShow_.fireworks(effectiveSpeed, deviceState_.explosionSize, deviceState_.currentPalette);
+            break;
+        // Chevron (panel) effects reuse existing parameter fields too. Their
+        // direction is the strip-direction toggle, with false = the natural
+        // way: waves toward the front, bursts out of the points.
+        case LightSceneID::chevron_wave:
+            lightShow_.chevron_wave(effectiveSpeed, deviceState_.waveWidth, deviceState_.currentPalette, !deviceState_.reverseStrip);
+            break;
+        case LightSceneID::chevron_chase:
+            lightShow_.chevron_chase(effectiveSpeed, deviceState_.trailLength, deviceState_.currentPalette, !deviceState_.reverseStrip);
+            break;
+        case LightSceneID::chevron_burst:
+            lightShow_.chevron_burst(effectiveSpeed, deviceState_.waveWidth, deviceState_.currentPalette, !deviceState_.reverseStrip);
+            break;
+        case LightSceneID::chevron_glow:
+            lightShow_.chevron_glow(effectiveSpeed, deviceState_.currentPalette);
+            break;
+        case LightSceneID::chevron_eq:
+            lightShow_.chevron_eq(effectiveSpeed, deviceState_.currentPalette);
+            break;
+        // The FastLED classics reuse existing parameter fields (and BLE codes)
+        // like the batch above: confetti density rides dropRate, juggle's ball
+        // count rides cometCount, the sinelon trail rides trailLength. bpm and
+        // pacifica have no knob beyond the speed slider.
+        case LightSceneID::confetti:
+            lightShow_.confetti(effectiveSpeed, deviceState_.dropRate, deviceState_.currentPalette);
+            break;
+        case LightSceneID::juggle:
+            lightShow_.juggle(effectiveSpeed, deviceState_.cometCount, deviceState_.currentPalette);
+            break;
+        case LightSceneID::sinelon:
+            lightShow_.sinelon(effectiveSpeed, deviceState_.trailLength, deviceState_.currentPalette);
+            break;
+        case LightSceneID::bpm:
+            lightShow_.bpm(effectiveSpeed, deviceState_.currentPalette);
+            break;
+        case LightSceneID::pacifica:
+            lightShow_.pacifica(effectiveSpeed);
+            break;
+        // True-2D panel effects, same parameter-reuse scheme: the wave scale
+        // rides cloudScale, flame height rides heatVariance, rain density
+        // rides dropRate, and the spoke count rides spiralArms.
+        case LightSceneID::panel_waves:
+            lightShow_.panel_waves(effectiveSpeed, deviceState_.cloudScale, deviceState_.currentPalette);
+            break;
+        case LightSceneID::panel_fire:
+            lightShow_.panel_fire(effectiveSpeed, deviceState_.heatVariance, deviceState_.currentPalette);
+            break;
+        case LightSceneID::panel_rain:
+            lightShow_.panel_rain(effectiveSpeed, deviceState_.dropRate, deviceState_.currentPalette);
+            break;
+        case LightSceneID::panel_spin:
+            lightShow_.panel_spin(effectiveSpeed, deviceState_.spiralArms, deviceState_.currentPalette);
+            break;
+        // Same parameter-reuse scheme as the rest: star density rides
+        // dropRate, the comet tail rides trailLength, rain density dropRate.
+        case LightSceneID::starfield:
+            lightShow_.starfield(effectiveSpeed, deviceState_.dropRate, deviceState_.currentPalette, !deviceState_.reverseStrip);
+            break;
+        case LightSceneID::orbit_comet:
+            lightShow_.orbit_comet(effectiveSpeed, deviceState_.trailLength, deviceState_.currentPalette, !deviceState_.reverseStrip);
+            break;
+        case LightSceneID::panel_puddle:
+            lightShow_.panel_puddle(effectiveSpeed, deviceState_.dropRate, deviceState_.currentPalette);
             break;
         case LightSceneID::speedometer:
             // GPS speedometer effect - blend colors based on current speed
@@ -879,7 +1255,7 @@ void BMDevice::handleEffectFeature(const uint8_t* buffer, size_t length) {
     if (length > 1) {
         if (length == 2) { // ID
             uint8_t effectId = buffer[1];
-            if (effectId <= (uint8_t)LightSceneID::fireworks) {
+            if (effectId <= (uint8_t)LIGHT_SCENE_ID_MAX) {
                 Serial.print("[BMDevice] handleEffectFeature: Received effect ID: ");
                 Serial.println(effectId);
                 setEffect((LightSceneID)effectId);
@@ -1030,26 +1406,21 @@ bool BMDevice::loadDefaults() {
 }
 
 bool BMDevice::saveCurrentAsDefaults() {
-    DeviceDefaults currentDefaults = defaults_.getCurrentDefaults();
-    DeviceDefaults newDefaults;
-    
-    // Copy current state to defaults. Internal brightness is 1-255; store as 1-100 for app
-    newDefaults.brightness = constrain(brightnessLevelToPercent(deviceState_.brightness), 1, currentDefaults.maxBrightness);
+    // Start from the stored defaults so everything this button does not mean
+    // to capture - identity, strip rows, GPS tuning, sync, device type -
+    // survives the save. Building from a fresh DeviceDefaults (factory
+    // settings) and copying fields across silently reset whatever was not on
+    // the copy list.
+    DeviceDefaults newDefaults = defaults_.getCurrentDefaults();
+
+    // The look. Internal brightness is 1-255; store as 1-100 for app
+    newDefaults.brightness = constrain(brightnessLevelToPercent(deviceState_.brightness), 1, newDefaults.maxBrightness);
     newDefaults.speed = deviceState_.speed;
     newDefaults.palette = deviceState_.currentPalette;
     newDefaults.effect = deviceState_.currentEffect;
     newDefaults.reverseDirection = deviceState_.reverseStrip;
     newDefaults.effectColor = deviceState_.effectColor;
-    
-    // Keep existing identity and behavior settings
-    newDefaults.maxBrightness = currentDefaults.maxBrightness;
-    newDefaults.owner = currentDefaults.owner;
-    newDefaults.deviceName = currentDefaults.deviceName;
-    newDefaults.autoOn = currentDefaults.autoOn;
-    newDefaults.statusUpdateInterval = currentDefaults.statusUpdateInterval;
-    newDefaults.gpsEnabled = currentDefaults.gpsEnabled;
-    newDefaults.version = currentDefaults.version;
-    
+
     bool success = defaults_.saveDefaults(newDefaults);
     if (success) {
         Serial.println("[BMDevice] Current state saved as defaults");
@@ -1079,6 +1450,8 @@ void BMDevice::applyDefaults() {
     // Load the stored palettes first: the default palette may well be one of
     // them, and selecting an empty slot renders black.
     applyCustomPalettes();
+    // And the marquee text / bitmap, in case the default effect displays them.
+    applyMatrixArt();
     
     // Apply defaults to current state. Stored brightness/max are 1-100; scale to 1-255 for LED
     int scaledB = brightnessPercentToLevel(defaults.brightness);
@@ -1333,6 +1706,147 @@ void BMDevice::applyCustomPalettes() {
     }
 }
 
+// [0x80][ASCII text]
+void BMDevice::handleSetMarqueeTextFeature(const uint8_t* buffer, size_t length) {
+    char text[MARQUEE_TEXT_MAX + 1] = {0};
+    size_t textLength = length > 1 ? min(length - 1, (size_t)MARQUEE_TEXT_MAX) : 0;
+    memcpy(text, buffer + 1, textLength);
+
+    defaults_.setMarqueeText(String(text));
+    // Live: panel_text reads the stored text every frame, mid-scroll included.
+    lightShow_.setMarqueeText(text);
+
+    Serial.printf("[BMDevice] Marquee text set to \"%s\"\n", text);
+    markStatusDirty();
+}
+
+// [0x81][w][h][MATRIX_BITMAP_COLORS * RGB][ceil(w*h/2) packed 4bpp pixels]
+void BMDevice::handleSetMatrixBitmapFeature(const uint8_t* buffer, size_t length) {
+    const size_t paletteBytes = MATRIX_BITMAP_COLORS * 3;
+    if (length < 3 + paletteBytes) {
+        Serial.println("[BMDevice] Matrix bitmap write too short");
+        return;
+    }
+
+    uint8_t w = buffer[1];
+    uint8_t h = buffer[2];
+    if (w == 0 || h == 0 || (size_t)w * h > MATRIX_BITMAP_MAX_PIXELS) {
+        Serial.println("[BMDevice] Matrix bitmap dimensions out of range");
+        return;
+    }
+    size_t pixelBytes = ((size_t)w * h + 1) / 2;
+    if (length != 3 + paletteBytes + pixelBytes) {
+        Serial.printf("[BMDevice] Matrix bitmap payload is %u bytes, expected %u\n",
+                      (unsigned)length, (unsigned)(3 + paletteBytes + pixelBytes));
+        return;
+    }
+
+    // The stored blob is the payload minus the feature byte, so load and save
+    // stay the same bytes.
+    if (!defaults_.setMatrixBitmap(buffer + 1, length - 1)) {
+        Serial.println("[BMDevice] Failed to store matrix bitmap");
+        return;
+    }
+    lightShow_.setMatrixBitmap(w, h, buffer + 3, buffer + 3 + paletteBytes);
+
+    Serial.printf("[BMDevice] Matrix bitmap set: %ux%u\n", w, h);
+    markStatusDirty();
+}
+
+// [0x82]
+void BMDevice::handleClearMatrixBitmapFeature(const uint8_t* buffer, size_t length) {
+    (void)buffer;
+    (void)length;
+    defaults_.clearMatrixBitmap();
+    lightShow_.clearMatrixBitmap();
+    Serial.println("[BMDevice] Matrix bitmap cleared");
+    markStatusDirty();
+}
+
+// [0x86][slot][w][h][MATRIX_BITMAP_COLORS * RGB][ceil(w*h/2) packed 4bpp pixels]
+void BMDevice::handleSetAnimFrameFeature(const uint8_t* buffer, size_t length) {
+    const size_t paletteBytes = MATRIX_BITMAP_COLORS * 3;
+    if (length < 4 + paletteBytes) {
+        Serial.println("[BMDevice] Anim frame write too short");
+        return;
+    }
+
+    uint8_t slot = buffer[1];
+    uint8_t w = buffer[2];
+    uint8_t h = buffer[3];
+    if (slot >= MATRIX_ANIM_MAX_FRAMES || w == 0 || h == 0 ||
+        (size_t)w * h > MATRIX_BITMAP_MAX_PIXELS) {
+        Serial.println("[BMDevice] Anim frame slot/dimensions out of range");
+        return;
+    }
+    size_t pixelBytes = ((size_t)w * h + 1) / 2;
+    if (length != 4 + paletteBytes + pixelBytes) {
+        Serial.printf("[BMDevice] Anim frame payload is %u bytes, expected %u\n",
+                      (unsigned)length, (unsigned)(4 + paletteBytes + pixelBytes));
+        return;
+    }
+
+    // The stored blob is [w][h][palette][pixels] - the bitmap's format - so
+    // load and save share the parsing.
+    if (!defaults_.setAnimFrame(slot, buffer + 2, length - 2)) {
+        Serial.println("[BMDevice] Failed to store anim frame");
+        return;
+    }
+    lightShow_.setAnimFrame(slot, w, h, buffer + 4, buffer + 4 + paletteBytes);
+
+    Serial.printf("[BMDevice] Anim frame %u set: %ux%u\n", slot, w, h);
+    markStatusDirty();
+}
+
+// [0x87]
+void BMDevice::handleClearAnimFramesFeature(const uint8_t* buffer, size_t length) {
+    (void)buffer;
+    (void)length;
+    defaults_.clearAnimFrames();
+    lightShow_.clearAnimFrames();
+    Serial.println("[BMDevice] Anim frames cleared");
+    markStatusDirty();
+}
+
+void BMDevice::applyMatrixArt() {
+    lightShow_.setMarqueeText(defaults_.getMarqueeText().c_str());
+    lightShow_.setTextStyle(defaults_.getTextStyle());
+    lightShow_.setTextFill(defaults_.getTextFill());
+    // The display overlay's mode and pace persist like the content does, so
+    // the bike boots straight back into whatever it was showing.
+    lightShow_.setMatrixSpeed(defaults_.getMatrixSpeed());
+    lightShow_.setMatrixDisplay(defaults_.getMatrixDisplay());
+
+    uint8_t blob[2 + MATRIX_BITMAP_COLORS * 3 + MATRIX_BITMAP_MAX_PIXELS / 2];
+    // A frame blob shares the bitmap's [w][h][palette][pixels] layout, and a
+    // gap ends playback, so loading stops at the first empty slot.
+    for (uint8_t slot = 0; slot < MATRIX_ANIM_MAX_FRAMES; slot++) {
+        size_t stored = defaults_.getAnimFrame(slot, blob, sizeof(blob));
+        if (stored < 2 + (size_t)MATRIX_BITMAP_COLORS * 3) {
+            break;
+        }
+        uint8_t w = blob[0];
+        uint8_t h = blob[1];
+        if (w == 0 || h == 0 || (size_t)w * h > MATRIX_BITMAP_MAX_PIXELS ||
+            stored != 2 + (size_t)MATRIX_BITMAP_COLORS * 3 + ((size_t)w * h + 1) / 2) {
+            break;
+        }
+        lightShow_.setAnimFrame(slot, w, h, blob + 2, blob + 2 + MATRIX_BITMAP_COLORS * 3);
+    }
+
+    size_t stored = defaults_.getMatrixBitmap(blob, sizeof(blob));
+    if (stored < 2 + (size_t)MATRIX_BITMAP_COLORS * 3) {
+        return;
+    }
+    uint8_t w = blob[0];
+    uint8_t h = blob[1];
+    if (w == 0 || h == 0 || (size_t)w * h > MATRIX_BITMAP_MAX_PIXELS ||
+        stored != 2 + (size_t)MATRIX_BITMAP_COLORS * 3 + ((size_t)w * h + 1) / 2) {
+        return;
+    }
+    lightShow_.setMatrixBitmap(w, h, blob + 2, blob + 2 + MATRIX_BITMAP_COLORS * 3);
+}
+
 void BMDevice::handleSetDeviceNameFeature(const uint8_t* buffer, size_t length) {
     if (length > 1) {
         char nameStr[33] = {0};
@@ -1399,6 +1913,18 @@ void BMDevice::handleSetGPSLightshowSpeedEnabledFeature(const uint8_t* buffer, s
     }
 }
 
+void BMDevice::handleSetSyncEnabledFeature(const uint8_t* buffer, size_t length) {
+    if (length >= 2) {
+        bool enabled = buffer[1] != 0;
+        defaults_.setSyncEnabled(enabled);
+        // serviceSync() picks the change up on its next pass: enabling joins
+        // the group (radio up, QUERY out), disabling drops the radio.
+        markStatusDirty();
+        Serial.print("[BMDevice] Device sync ");
+        Serial.println(enabled ? "enabled" : "disabled");
+    }
+}
+
 void BMDevice::handleSetDeviceTypeFeature(const uint8_t* buffer, size_t length) {
     if (length > 1) {
         String deviceType = String((char*)(buffer + 1), length - 1);
@@ -1425,6 +1951,48 @@ void BMDevice::handleConfigureLEDStripFeature(const uint8_t* buffer, size_t leng
                          stripIndex, pin, numLeds, colorOrder, enabled ? "enabled" : "disabled");
             markStatusDirty();
         }
+    }
+}
+
+// [0x7F][stripIndex][ledsPerPixel]: mark a strand as grouped (a 12 V glow
+// strip drives 6 LEDs from every pixel) or normal. Indexed by registration
+// order - the same order the "strips" chunk reports - so it reaches strips
+// the sketch hardcodes (the bike's chevron panel) as well as NVRAM rows.
+void BMDevice::handleSetStripGroupFeature(const uint8_t* buffer, size_t length) {
+    if (length >= 3) {
+        int stripIndex = buffer[1];
+        int groupSize = buffer[2];
+        if (stripIndex < 0 || (size_t)stripIndex >= registeredStripCount_) {
+            Serial.printf("[BMDevice] Strip group: no strip %d (have %d)\n",
+                         stripIndex, (int)registeredStripCount_);
+            return;
+        }
+        defaults_.setStripGroupSize(stripIndex, groupSize);
+        lightShow_.setStripGroupSize((size_t)stripIndex, (uint8_t)constrain(groupSize, 1, 12));
+        markStatusDirty();
+        Serial.printf("[BMDevice] Strip %d (pin %d): %dx grouping\n",
+                     stripIndex, registeredStrips_[stripIndex].pin, groupSize);
+    }
+}
+
+// [0x88][stripIndex][max 1-255]: cap one strand's brightness. Same
+// registration-order index as 0x7F; the master brightness scales within the
+// cap, so the rig still dims together on one slider.
+void BMDevice::handleSetStripBrightnessFeature(const uint8_t* buffer, size_t length) {
+    if (length >= 3) {
+        int stripIndex = buffer[1];
+        int maxBrightness = buffer[2];
+        if (stripIndex < 0 || (size_t)stripIndex >= registeredStripCount_) {
+            Serial.printf("[BMDevice] Strip brightness: no strip %d (have %d)\n",
+                         stripIndex, (int)registeredStripCount_);
+            return;
+        }
+        defaults_.setStripMaxBrightness(stripIndex, maxBrightness);
+        lightShow_.setStripMaxBrightness((size_t)stripIndex, (uint8_t)constrain(maxBrightness, 1, 255));
+        lightShow_.requestRepaint();
+        markStatusDirty();
+        Serial.printf("[BMDevice] Strip %d (pin %d): max brightness %d/255\n",
+                     stripIndex, registeredStrips_[stripIndex].pin, maxBrightness);
     }
 }
 
@@ -1655,30 +2223,75 @@ void BMDevice::sendDeviceConfigChunk() {
     // Device configuration - abbreviated keys
     doc["devType"] = defaults.deviceType;
     doc["auto"] = defaults.autoOn;
+    doc["sync"] = defaults.syncEnabled;
     doc["gps"] = gpsEnabled_;  // Use runtime GPS state, not saved defaults
     doc["interval"] = defaults.statusUpdateInterval;
     doc["owner"] = defaults.owner;
     doc["deviceName"] = defaults.deviceName;
     doc["fwVer"] = FIRMWARE_VERSION;
-    
-    // LED strip configuration - abbreviated
-    doc["strips"] = defaults.activeLEDStrips;
-    JsonArray stripsArray = doc.createNestedArray("leds");
-    
-    for (int i = 0; i < defaults.activeLEDStrips && i < MAX_LED_STRIPS; i++) {
-        if (!defaults.ledStrips[i].enabled) continue;
-        
-        JsonObject stripObj = stripsArray.createNestedObject();
-        stripObj["i"] = i;                                   // index
-        stripObj["p"] = defaults.ledStrips[i].pin;           // pin
-        stripObj["n"] = defaults.ledStrips[i].numLeds;       // numLeds
-        stripObj["o"] = defaults.ledStrips[i].colorOrder;    // colorOrder
-        stripObj["e"] = defaults.ledStrips[i].enabled;       // enabled
-    }
-    
+
+    // Strips actually registered with the show. The per-strip rows moved to
+    // the compact "strips" chunk: as an array here they overflowed both this
+    // doc and the notify payload on an 8-strip rig.
+    doc["strips"] = (int)registeredStripCount_;
+
     String status;
     serializeJson(doc, status);
     BM_LOGV("[BMDevice] Device config chunk: %s\n", status.c_str());
+    bluetoothHandler_.sendStatusUpdate(status);
+}
+
+void BMDevice::sendRadioChunk() {
+    // Sync radio diagnostics, so a bench test can see the radio state and
+    // packet counts from the app instead of needing a serial cable. In their
+    // own chunk because the counters grow: two lifetime packet counts at ten
+    // digits each were part of what pushed devConfig past the ~239-byte
+    // notify payload (see sendMatrixChunk for the failure mode).
+    StaticJsonDocument<128> doc;
+    doc["type"] = "radio";
+    doc["syncSt"] = sync_.radioStateName();
+    doc["syncTx"] = sync_.txCount();
+    doc["syncRx"] = sync_.rxCount();
+
+    String status;
+    serializeJson(doc, status);
+    BM_LOGV("[BMDevice] Radio chunk: %s\n", status.c_str());
+    bluetoothHandler_.sendStatusUpdate(status);
+}
+
+void BMDevice::sendMatrixChunk() {
+    // Matrix display state, in its own chunk. These keys used to ride
+    // devConfig, which the txtFill/anim/sync-counter additions pushed past
+    // the ~239-byte notify payload - a truncated chunk parses as nothing, so
+    // every central silently lost mtxW (and with it the whole matrix UI).
+    // Same story as the old per-strip rows; same fix. Every client merges
+    // status keys regardless of chunk type, so the move is invisible to them.
+    // 384: ten-ish slots plus a full-length marquee copied into the pool -
+    // the SERIALIZED chunk stays well under the ~239-byte notify ceiling.
+    StaticJsonDocument<384> doc;
+
+    // The grid dimensions (0/absent = no display, which is how the apps know
+    // whether to offer the text/pixel-art modes at all), the marquee text (so
+    // an app's input can show what the device will scroll), the text style
+    // and fill, and whether a bitmap / how many animation frames are stored.
+    // The pixel content itself never rides status - the phone keeps its own.
+    doc["type"] = "matrix";
+    doc["mtxW"] = lightShow_.matrixGridWidth();
+    doc["mtxH"] = lightShow_.matrixGridHeight();
+    doc["marquee"] = defaults_.getMarqueeText();
+    doc["bmp"] = lightShow_.hasMatrixBitmap();
+    doc["txtSty"] = defaults_.getTextStyle();
+    doc["txtFill"] = defaults_.getTextFill();
+    doc["anim"] = lightShow_.animFrameCount();
+    // The display overlay: what the panel is showing (0 = the effect owns
+    // it) and the display's own pace in ms. Both independent of the effect
+    // keys in the basic chunk.
+    doc["disp"] = defaults_.getMatrixDisplay();
+    doc["mtxMs"] = defaults_.getMatrixSpeed();
+
+    String status;
+    serializeJson(doc, status);
+    BM_LOGV("[BMDevice] Matrix chunk: %s\n", status.c_str());
     bluetoothHandler_.sendStatusUpdate(status);
 }
 
@@ -1715,6 +2328,32 @@ void BMDevice::sendDefaultsChunk() {
 /// One chunk per custom palette slot, so a full palette (16 colours) still fits
 /// inside a single notification. An empty slot reports itself as empty rather
 /// than staying silent - that is how the apps learn a palette was deleted.
+/// The strips actually playing the show, one compact row per strip:
+/// "index,pin,ledCount,groupSize,maxBrightness;..." - a packed string rather
+/// than a JSON array because eight object rows overflow a single notify, and
+/// this must stay one chunk (two chunks would overwrite each other in the
+/// app). New fields append to the row: the app takes what it knows and
+/// defaults the rest, so either side can update first.
+void BMDevice::sendStripsChunk() {
+    StaticJsonDocument<384> doc;
+    doc["type"] = "strips";
+
+    String rows;
+    for (size_t i = 0; i < registeredStripCount_; i++) {
+        if (rows.length() > 0) rows += ';';
+        rows += String((int)i) + ',' + String(registeredStrips_[i].pin) + ',' +
+                String(registeredStrips_[i].numLeds) + ',' +
+                String(defaults_.getStripGroupSize((int)i)) + ',' +
+                String(defaults_.getStripMaxBrightness((int)i));
+    }
+    doc["rows"] = rows;
+
+    String status;
+    serializeJson(doc, status);
+    BM_LOGV("[BMDevice] Strips chunk: %s\n", status.c_str());
+    bluetoothHandler_.sendStatusUpdate(status);
+}
+
 void BMDevice::sendCustomPaletteChunk(int slot) {
     StaticJsonDocument<256> doc;
     doc["type"] = "cpal";
@@ -1783,6 +2422,9 @@ void BMDevice::initializeDefaultStatusChunks() {
     // Register default chunks that all BMDevice instances will send (using abbreviated types)
     registerStatusChunk("basicStatus", [this]() { sendBasicStatusChunk(); }, "Core device state and settings");
     registerStatusChunk("devConfig", [this]() { sendDeviceConfigChunk(); }, "Device configuration and LED setup");
+    registerStatusChunk("matrix", [this]() { sendMatrixChunk(); }, "Matrix display grid, marquee text and stored content");
+    registerStatusChunk("radio", [this]() { sendRadioChunk(); }, "Sync radio state and packet counters");
+    registerStatusChunk("strips", [this]() { sendStripsChunk(); }, "Registered strips and their grouping");
     registerStatusChunk("effectParams", [this]() { sendEffectParametersChunk(); }, "Effect parameters controlled via BLE commands 0x0B-0x19");
     registerStatusChunk("defaults", [this]() { sendDefaultsChunk(); }, "Persistent default settings");
     for (int slot = 0; slot < CUSTOM_PALETTE_COUNT; slot++) {

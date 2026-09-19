@@ -33,6 +33,21 @@ void storeClearCal() {
   prefs.end();
 }
 
+bool storeLoadCycle(bool defaultOn) {
+  Preferences prefs;
+  prefs.begin(NS, true);
+  bool on = prefs.getBool("cycle", defaultOn);
+  prefs.end();
+  return on;
+}
+
+void storeSaveCycle(bool on) {
+  Preferences prefs;
+  prefs.begin(NS, false);
+  prefs.putBool("cycle", on);
+  prefs.end();
+}
+
 void storeLoadBars() {
   Preferences prefs;
   prefs.begin(NS, true);

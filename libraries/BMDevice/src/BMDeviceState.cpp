@@ -124,16 +124,17 @@ void BMDeviceState::applyStateUpdate(const String& json) {
     }
     if (doc.containsKey("dir")) reverseStrip = doc["dir"];
     
-    // Update effect state
+    // Update effect state. The ceilings are the true enum tails - stale
+    // mid-enum ones here used to silently drop every newer effect and palette.
     if (doc.containsKey("fxId")) {
         uint8_t effectId = doc["fxId"];
-        if (effectId <= (uint8_t)LightSceneID::spiral_galaxy) {
+        if (effectId <= (uint8_t)LIGHT_SCENE_ID_MAX) {
             currentEffect = (LightSceneID)effectId;
         }
     }
     if (doc.containsKey("palId")) {
         uint8_t paletteId = doc["palId"];
-        if (paletteId <= (uint8_t)AvailablePalettes::moltenmetal) {
+        if (paletteId <= (uint8_t)AvailablePalettes::custom4) {
             currentPalette = (AvailablePalettes)paletteId;
         }
     }

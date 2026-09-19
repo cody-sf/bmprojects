@@ -60,7 +60,12 @@ const backpackModes = extractObject(ts, 'BACKPACK_MODES');
 const modeMapping = extractObject(ts, 'modeMapping');
 
 const fwPalettes = extractCppNames(cpp, 'paletteNameMap');
-const fwEffects = extractCppNames(cpp, 'effectNameMap');
+// The matrix display ids stay in the firmware's name map for wire compat,
+// but the display is an overlay now (BLE 0x89), not an effect: selecting one
+// from the watch would just switch the bike's display on with no way to turn
+// it off from here. Keep them out of the mode list.
+const DISPLAY_IDS = new Set(['panel_text', 'panel_bitmap', 'panel_words', 'panel_anim']);
+const fwEffects = extractCppNames(cpp, 'effectNameMap').filter(f => !DISPLAY_IDS.has(f));
 
 const title = s => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 const swiftStr = s => '"' + s.replace(/["\\]/g, '\\$&') + '"';

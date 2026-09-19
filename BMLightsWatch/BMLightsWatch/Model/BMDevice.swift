@@ -94,8 +94,10 @@ final class BMDevice: NSObject, ObservableObject, Identifiable {
             ?? BMCatalog.palettes[0]
     }
     var effect: BMEffect { BMCatalog.effect(id: effectId) ?? BMCatalog.effects[0] }
-    /// The bike has no status characteristic, so its state is write-only.
-    var reportsStatus: Bool { profile?.status != nil }
+    /// False when the device never exposed a status characteristic - firmware
+    /// older than this app knows about. Such a device is still controllable,
+    /// but write-only, so there is nothing to poll for.
+    var reportsStatus: Bool { statusCharacteristic != nil }
 
     // MARK: - Controls
 

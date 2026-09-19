@@ -28,6 +28,8 @@ struct AppState {
   uint8_t allR = 0xff, allG = 0x88, allB = 0x00;
   int8_t selectedPalette = -1;
   int8_t selectedMode = -1;
+  // Gently walk the selected palette's colours across the bars over time.
+  bool cycleEnabled = true;
   // Set by the BLE task whenever a bar connects/drops; screens repaint and
   // clear it from the UI loop.
   volatile bool connectionsDirty = false;

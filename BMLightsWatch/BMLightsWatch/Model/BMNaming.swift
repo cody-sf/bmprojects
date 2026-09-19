@@ -3,10 +3,13 @@ import Foundation
 /// Naming, kept deliberately in step with `resolveDeviceName` in
 /// `RNUmbrella/helpers.ts`.
 ///
-/// Devices advertise as `<identifier> - <owner>`: "BMDevice - Cody",
-/// "Umbrella-CL". That leading identifier is how a scan recognises our gear, so
-/// it stays on the wire — but "BMDevice" is a category, not a name, and it has
-/// no business being the thing on screen.
+/// Devices advertise as `<identifier> - <label>`: "BMDevice - Codys Bike",
+/// "Umbrella-CL". The label is the device's friendly name, with the owner as
+/// the fallback for never-named devices — so the suffix must never be read as
+/// "the owner"; the status report is the source for that. The leading
+/// identifier is how a scan recognises our gear, so it stays on the wire — but
+/// "BMDevice" is a category, not a name, and it has no business being the
+/// thing on screen.
 ///
 /// Real device words (Umbrella, Backpack, Bike…) are descriptive and stay put.
 /// Only the generic identifier is dropped.

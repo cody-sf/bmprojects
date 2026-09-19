@@ -28,7 +28,7 @@ void hsvToRgb(float h, float s, float v, uint8_t& r, uint8_t& g, uint8_t& b) {
 
 void uiBegin() {
   tft.init();
-  tft.setRotation(0);  // portrait, phone-shaped; use 2 if your box mounts it flipped
+  tft.setRotation(1);  // landscape; use 3 if your case mounts the USB on the left
   tft.fillScreen(COL_BG);
 #ifdef TFT_BL
   pinMode(TFT_BL, OUTPUT);
@@ -36,60 +36,62 @@ void uiBegin() {
 #endif
 }
 
-void uiClearContent(bool fullHeight) {
-  tft.fillRect(0, CONTENT_Y, SCREEN_W, fullHeight ? SCREEN_H - CONTENT_Y : CONTENT_H, COL_BG);
+void uiClearContent(bool modal) {
+  int16_t x = modal ? 0 : RAIL_W;
+  tft.fillRect(x, CONTENT_Y, SCREEN_W - x, CONTENT_H, COL_BG);
 }
 
-void uiHeader(const char* title, bool showGear) {
-  tft.fillRect(0, 0, SCREEN_W, HEADER_H, COL_BG);
+void uiHeader(const char* title, bool withRail) {
+  int16_t x0 = withRail ? RAIL_W : 0;
+  tft.fillRect(x0, 0, SCREEN_W - x0, HEADER_H, COL_BG);
   tft.setFreeFont(&FreeSansBold9pt7b);
   tft.setTextColor(COL_TEXT, COL_BG);
   tft.setTextDatum(ML_DATUM);
-  tft.drawString(title, PAD, HEADER_H / 2 + 1);
+  tft.drawString(title, x0 + 8, HEADER_H / 2 + 1);
   tft.setTextFont(2);
 
   char count[8];
   snprintf(count, sizeof(count), "%d/%d", connectedCount(), barCount());
   tft.setTextDatum(MR_DATUM);
   tft.setTextColor(connectedCount() ? COL_GREEN : COL_CAPTION, COL_BG);
-  tft.drawString(count, showGear ? SCREEN_W - 34 : SCREEN_W - PAD, HEADER_H / 2 + 1);
-
-  if (showGear) {
-    // A small gear: circle, four teeth, hollow centre.
-    int16_t cx = SCREEN_W - 18, cy = HEADER_H / 2;
-    tft.fillCircle(cx, cy, 7, COL_CAPTION);
-    tft.fillRect(cx - 2, cy - 10, 4, 4, COL_CAPTION);
-    tft.fillRect(cx - 2, cy + 6, 4, 4, COL_CAPTION);
-    tft.fillRect(cx - 10, cy - 2, 4, 4, COL_CAPTION);
-    tft.fillRect(cx + 6, cy - 2, 4, 4, COL_CAPTION);
-    tft.fillCircle(cx, cy, 3, COL_BG);
-  }
+  tft.drawString(count, SCREEN_W - 8, HEADER_H / 2 + 1);
   tft.setTextDatum(TL_DATUM);
 }
 
-Rect uiGearRect() {
-  return {SCREEN_W - 32, 0, 32, HEADER_H};
-}
+static const int16_t RAIL_TAB_Y0 = 6, RAIL_TAB_H = 42, RAIL_TAB_STEP = 46;
+static const int16_t RAIL_GEAR_Y = 190;
 
-void uiTabBar(int active) {
-  int16_t y = SCREEN_H - TABBAR_H;
-  tft.fillRect(0, y, SCREEN_W, TABBAR_H, COL_CARD);
+void uiTabRail(int active) {
+  tft.fillRect(0, 0, RAIL_W, SCREEN_H, COL_CARD);
   tft.setTextFont(2);
   tft.setTextDatum(MC_DATUM);
   for (int i = 0; i < 4; i++) {
-    int16_t x = i * 60;
+    int16_t y = RAIL_TAB_Y0 + i * RAIL_TAB_STEP;
     if (i == active) {
-      tft.fillRect(x + 8, y, 44, 3, COL_ACCENT);
+      tft.fillRect(0, y, 3, RAIL_TAB_H, COL_ACCENT);
     }
     tft.setTextColor(i == active ? COL_ACCENT2 : COL_CAPTION, COL_CARD);
-    tft.drawString(TAB_LABELS[i], x + 30, y + TABBAR_H / 2 + 1);
+    tft.drawString(TAB_LABELS[i], RAIL_W / 2 + 1, y + RAIL_TAB_H / 2 + 1);
   }
   tft.setTextDatum(TL_DATUM);
+
+  // Gear at the foot of the rail: circle, four teeth, hollow centre.
+  int16_t cx = RAIL_W / 2, cy = 216;
+  uint16_t col = active == 4 ? COL_ACCENT2 : COL_CAPTION;
+  if (active == 4) tft.fillRect(0, RAIL_GEAR_Y, 3, SCREEN_H - RAIL_GEAR_Y, COL_ACCENT);
+  tft.fillCircle(cx, cy, 8, col);
+  tft.fillRect(cx - 2, cy - 12, 4, 5, col);
+  tft.fillRect(cx - 2, cy + 7, 4, 5, col);
+  tft.fillRect(cx - 12, cy - 2, 5, 4, col);
+  tft.fillRect(cx + 7, cy - 2, 5, 4, col);
+  tft.fillCircle(cx, cy, 4, COL_CARD);
 }
 
 int uiTabHit(int16_t x, int16_t y) {
-  if (y < SCREEN_H - TABBAR_H) return -1;
-  return x / 60;
+  if (x >= RAIL_W) return -1;
+  if (y >= RAIL_GEAR_Y) return 4;
+  int idx = (y - RAIL_TAB_Y0) / RAIL_TAB_STEP;
+  return idx < 0 ? 0 : (idx > 3 ? 3 : idx);
 }
 
 void uiChip(const Rect& r, const char* label, bool selected, uint16_t bg, uint16_t fg) {
@@ -191,6 +193,7 @@ void uiPaletteCard(const Rect& r, const PaletteDef& p, bool selected) {
 
   // Name, shadowed so it survives any gradient (the app's textShadow).
   tft.setTextFont(2);
+  if (tft.textWidth(p.name) > r.w - 8) tft.setTextFont(1);
   tft.setTextDatum(BC_DATUM);
   int16_t cx = r.x + r.w / 2, by = r.y + r.h - 4;
   tft.setTextColor(rgb565(0x000000));
@@ -198,6 +201,7 @@ void uiPaletteCard(const Rect& r, const PaletteDef& p, bool selected) {
   tft.setTextColor(COL_TEXT);
   tft.drawString(p.name, cx, by);
   tft.setTextDatum(TL_DATUM);
+  tft.setTextFont(2);
 
   if (selected) {
     tft.drawRoundRect(r.x, r.y, r.w, r.h, 8, COL_ACCENT);

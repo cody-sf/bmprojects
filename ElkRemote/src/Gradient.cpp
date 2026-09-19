@@ -21,24 +21,62 @@ RGB8 paletteColorAt(const PaletteDef& p, float t) {
   };
 }
 
-void spreadPalette(const PaletteDef& p, int count, RGB8* out) {
-  if (count <= 0) return;
-  if (count > 3) {
-    // Even spread: endpoints included, palette reads across the row.
-    for (int i = 0; i < count; i++) {
-      float t = count < 2 ? 0.0f : static_cast<float>(i) / (count - 1);
-      out[i] = paletteColorAt(p, t);
+// Below this peak channel a sample reads as "off" on a bar and is dropped.
+static const uint8_t DARK_CUTOFF = 28;
+// Survivors are scaled so their peak channel reaches at least this - hue and
+// saturation keep their ratios, only the level comes up.
+static const uint8_t VIVID_FLOOR = 110;
+
+static uint8_t maxChannel(const RGB8& c) {
+  uint8_t m = c.r > c.g ? c.r : c.g;
+  return c.b > m ? c.b : m;
+}
+
+static RGB8 vividize(const RGB8& c) {
+  uint8_t m = maxChannel(c);
+  if (m == 0 || m >= VIVID_FLOOR) return c;
+  float scale = static_cast<float>(VIVID_FLOOR) / m;
+  auto up = [scale](uint8_t v) {
+    float s = v * scale;
+    return static_cast<uint8_t>(s > 255.0f ? 255 : s + 0.5f);
+  };
+  return {up(c.r), up(c.g), up(c.b)};
+}
+
+int buildVividTrack(const PaletteDef& p, RGB8* track, int maxLen) {
+  int len = 0;
+  for (int i = 0; i < maxLen; i++) {
+    float t = maxLen < 2 ? 0.0f : static_cast<float>(i) / (maxLen - 1);
+    RGB8 c = paletteColorAt(p, t);
+    if (maxChannel(c) >= DARK_CUTOFF) {
+      track[len++] = vividize(c);
     }
-    return;
   }
-  // Jittered: a pool of 16 even samples, one random pick per window.
-  const int POOL = 16;
-  for (int i = 0; i < count; i++) {
-    int start = (i * POOL) / count;
-    int end = ((i + 1) * POOL) / count;
-    int span = end - start;
-    int pick = start + (span > 0 ? random(span) : 0);
-    if (pick > POOL - 1) pick = POOL - 1;
-    out[i] = paletteColorAt(p, POOL < 2 ? 0.0f : static_cast<float>(pick) / (POOL - 1));
+  if (len == 0) {
+    // Dark everywhere (nothing clears the cutoff): keep the shape, boosted.
+    for (int i = 0; i < maxLen; i++) {
+      float t = maxLen < 2 ? 0.0f : static_cast<float>(i) / (maxLen - 1);
+      track[len++] = vividize(paletteColorAt(p, t));
+    }
   }
+  return len;
+}
+
+RGB8 trackColorAt(const RGB8* track, int len, float phase) {
+  if (len <= 0) return {0, 0, 0};
+  if (len == 1) return track[0];
+  phase -= floorf(phase);
+  float f = phase * len;
+  int i = static_cast<int>(f);
+  if (i >= len) i = len - 1;
+  float local = f - i;
+  // Circular: the seam between last and first blends directly, never
+  // through the dark band that may have been cut between them.
+  const RGB8& a = track[i];
+  const RGB8& b = track[(i + 1) % len];
+  return {
+    static_cast<uint8_t>(a.r + (b.r - a.r) * local + 0.5f),
+    static_cast<uint8_t>(a.g + (b.g - a.g) * local + 0.5f),
+    static_cast<uint8_t>(a.b + (b.b - a.b) * local + 0.5f),
+  };
 }

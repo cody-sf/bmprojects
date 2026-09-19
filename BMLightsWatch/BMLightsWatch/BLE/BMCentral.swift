@@ -312,7 +312,7 @@ extension BMCentral: CBPeripheralDelegate {
             return
         }
         device.update(advertisedName: nil, rssi: nil, profile: profile)
-        peripheral.discoverCharacteristics([profile.features, profile.status].compactMap { $0 },
+        peripheral.discoverCharacteristics([profile.features, profile.status],
                                            for: service)
     }
 
@@ -327,12 +327,13 @@ extension BMCentral: CBPeripheralDelegate {
             giveUp(on: device, reason: "No control characteristic", forget: true)
             return
         }
-        let status = profile.status.flatMap { uuid in characteristics.first { $0.uuid == uuid } }
+        let status = characteristics.first { $0.uuid == profile.status }
         device.bind(features: features, status: status)
 
         guard let status else {
-            // No status characteristic at all (the bike): write-only, nothing
-            // to subscribe to and nothing to ask for.
+            // Every profile declares a status characteristic, so a device that
+            // does not expose one is running firmware older than this app knows
+            // about: controllable, but write-only. Nothing to subscribe to.
             return
         }
         // Subscribe, but do NOT ask for status yet. The firmware drops a status

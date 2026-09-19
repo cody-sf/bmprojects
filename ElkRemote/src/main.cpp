@@ -2,6 +2,7 @@
 #include "Actions.h"
 #include "AppState.h"
 #include "ElkLink.h"
+#include "Store.h"
 #include "Screens.h"
 #include "Theme.h"
 #include "TouchPad.h"
@@ -42,6 +43,8 @@ void setup() {
   digitalWrite(LED_R, HIGH);
   digitalWrite(LED_G, HIGH);
   digitalWrite(LED_B, HIGH);
+
+  app.cycleEnabled = storeLoadCycle(true);
 
   uiBegin();
   touchInit();

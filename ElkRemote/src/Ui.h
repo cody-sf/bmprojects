@@ -15,15 +15,16 @@ uint16_t rgbTo565(uint8_t r, uint8_t g, uint8_t b);
 void hsvToRgb(float h, float s, float v, uint8_t& r, uint8_t& g, uint8_t& b);
 
 void uiBegin();
-void uiClearContent(bool fullHeight);
 
-// Header: bold title, "n/m" connected count, optional gear (tap = Setup).
-void uiHeader(const char* title, bool showGear);
-Rect uiGearRect();
+// Main screens keep the rail; modal screens (color, rename, cal) take the
+// full width.
+void uiClearContent(bool modal);
+void uiHeader(const char* title, bool withRail);
 
+// The left rail: four tabs stacked, gear at the bottom.
 static const char* const TAB_LABELS[4] = {"Home", "Palettes", "Modes", "Bars"};
-void uiTabBar(int active);
-int uiTabHit(int16_t x, int16_t y);
+void uiTabRail(int active);
+int uiTabHit(int16_t x, int16_t y);  // -1 none, 0-3 tabs, 4 gear
 
 void uiChip(const Rect& r, const char* label, bool selected, uint16_t bg = COL_CHIP,
             uint16_t fg = COL_TEXT);

@@ -209,6 +209,10 @@ void setup() {
   // (the only place it touches FastLED globally), which would fight our LEDs.
   bmDevice->getState().power = true;
 
+  // And keep it out of the ESP-NOW sync group: a monitor has no look to
+  // share, and adopting the group's power-off would blank the status LEDs.
+  bmDevice->setSyncAvailable(false);
+
   Serial.printf("Monitoring %d ports, calibration %.3f\n", NUM_PORTS, calibrationFactor);
 }
 

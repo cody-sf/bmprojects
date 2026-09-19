@@ -53,6 +53,8 @@
 // generic esp32 image would lose its neon driver and pin map.
 #if defined(TARGET_SLUT)
   #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-slut.bin"
+#elif defined(TARGET_CODYS_BIKE)
+  #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-codys_bike.bin"
 #elif defined(TARGET_ESP32_C6)
   #define OTA_FIRMWARE_URL  OTA_FIRMWARE_BASE "/latest/firmware-c6.bin"
 #elif defined(TARGET_HOTEL_SIGN)

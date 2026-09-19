@@ -15,6 +15,7 @@
 #include "BMDeviceState.h"
 #include "BMBluetoothHandler.h"
 #include "BMDeviceDefaults.h"
+#include "BMSync.h"
 
 #define DEFAULT_BT_REFRESH_INTERVAL 5000
 #define DEFAULT_GPS_BAUD 9600
@@ -59,6 +60,7 @@ public:
     void addLEDStrip(CRGB* ledArray, int numLeds) {
         CLEDController& controller = FastLED.addLeds<CHIPSET, DATA_PIN, RGB_ORDER>(ledArray, numLeds);
         lightShow_.add_led_controller(&controller);
+        recordRegisteredStrip(DATA_PIN, numLeds);
         Serial.print("[BMDevice] Added LED strip: ");
         Serial.print(numLeds);
         Serial.print(" LEDs on pin ");
@@ -91,6 +93,17 @@ public:
     void setBrightness(int brightness);
     void setEffect(LightSceneID effect);
     void setPalette(AvailablePalettes palette);
+    /// The matrix display overlay (MATRIX_DISPLAY_*): what the grid strip
+    /// shows, independent of the running effect. Persisted; 0 hands the
+    /// panel back to the effect.
+    void setMatrixDisplay(uint8_t mode);
+    /// The display's own pace in ms per animation frame (text scales off the
+    /// same value). Persisted; the effect speed knob never touches it.
+    void setMatrixSpeed(uint16_t ms);
+    /// Blink every strip `blinks` times in `color`, then hand the LEDs back
+    /// to the show (or the dark). On-device UI feedback with no screen — the
+    /// encoder menu uses it to answer "which menu did that press land on".
+    void flashFeedback(const CRGB& color, uint8_t blinks);
     
     // Defaults management
     bool loadDefaults();
@@ -104,6 +117,15 @@ public:
     // Callbacks for custom behavior
     void setCustomFeatureHandler(std::function<bool(uint8_t feature, const uint8_t* data, size_t length)> handler);
     void setCustomConnectionHandler(std::function<void(bool connected)> handler);
+
+    // Feed a command through the same dispatch BLE writes land in (buffer[0]
+    // is the feature code, payload follows, exactly as written on the wire).
+    // For on-device bridges (the sign's MQTT/Home Assistant bridge) so every
+    // transport shares one set of semantics - constraints, persistence and
+    // the status fingerprint all behave as if the app had sent it.
+    void injectFeature(uint8_t feature, const uint8_t* buffer, size_t length) {
+        handleFeatureCommand(feature, buffer, length);
+    }
     
     // Chunked status update system
     void registerStatusChunk(const String& type, std::function<void()> sendFunction, const String& description = "");
@@ -124,6 +146,13 @@ public:
     // BTUmbrellaV3) call this instead of BMDevice::loop().
     bool takeDueStatusUpdate();
 
+    // Multi-device sync (ESP-NOW). loop() calls this; devices that drive
+    // their own loop (BTUmbrellaV3) call it alongside takeDueStatusUpdate().
+    void serviceSync();
+    // Hard opt-out for devices that are not light shows (the battery charger
+    // forces power on and must never adopt a group power-off). Unlike the
+    // 0x24 preference this is not user-reachable.
+    void setSyncAvailable(bool available) { syncAvailable_ = available; }
 
 private:
     // Core components
@@ -132,6 +161,9 @@ private:
     LightShow lightShow_;
     Clock deviceClock_;
     BMDeviceDefaults defaults_;
+    BMSync sync_;
+    unsigned long lastSyncServiceAt_;
+    bool syncAvailable_ = true;
     
     // GPS components (optional)
     bool gpsEnabled_;
@@ -156,9 +188,18 @@ private:
 
     // Find-me strobe deadline (0 = not identifying)
     unsigned long identifyUntil_ = 0;
+    unsigned long matrixTestUntil_ = 0;
+
+    // Feedback blink state (flashFeedback); 0 blinks = idle
+    CRGB feedbackColor_ = CRGB::White;
+    uint8_t feedbackBlinks_ = 0;
+    unsigned long feedbackStartAt_ = 0;
 
     // Power-off LED state, so the strips are cleared once instead of every loop
     bool ledsBlanked_;
+    // When the dark frame last went out; it is re-clocked once a second while
+    // off, so a strip that misses the transition blank still goes dark.
+    unsigned long lastBlankAt_ = 0;
 
     // Custom handlers
     std::function<bool(uint8_t, const uint8_t*, size_t)> customFeatureHandler_;
@@ -185,11 +226,35 @@ private:
     uint16_t calculateEffectiveSpeed();
     uint16_t positionStatusSpeed();
     
+    // Every strip actually playing the show, in the order it was added -
+    // whether the sketch hardcoded it (bike, SLUT, signs) or it came from the
+    // NVRAM strip config. This is what the app's Strands screen lists and
+    // what per-strip group sizes are keyed by; the config *rows* can't serve,
+    // because static targets never populate them.
+    struct RegisteredStrip {
+        uint8_t pin;
+        uint16_t numLeds;
+    };
+    RegisteredStrip registeredStrips_[MAX_LED_STRIPS];
+    size_t registeredStripCount_ = 0;
+    void recordRegisteredStrip(int pin, int numLeds) {
+        if (registeredStripCount_ < MAX_LED_STRIPS) {
+            registeredStrips_[registeredStripCount_].pin = (uint8_t)pin;
+            registeredStrips_[registeredStripCount_].numLeds = (uint16_t)numLeds;
+            registeredStripCount_++;
+        }
+    }
+    void sendStripsChunk();
+    void handleSetStripGroupFeature(const uint8_t* buffer, size_t length);
+    void handleSetStripBrightnessFeature(const uint8_t* buffer, size_t length);
+
     // Chunked status update methods
     void handleChunkedStatusUpdate();
     uint32_t computeStateFingerprint();
     void sendBasicStatusChunk();
     void sendDeviceConfigChunk();
+    void sendMatrixChunk();
+    void sendRadioChunk();
     void sendDefaultsChunk();
     void sendEffectParametersChunk();
     void sendCustomPaletteChunk(int slot);
@@ -222,12 +287,26 @@ private:
     /// Push every stored custom palette into the light show. Called at start-up
     /// and whenever the defaults are reloaded.
     void applyCustomPalettes();
+
+    // Matrix display content (marquee text + uploaded bitmap)
+    void handleSetMarqueeTextFeature(const uint8_t* buffer, size_t length);
+    void handleSetMatrixBitmapFeature(const uint8_t* buffer, size_t length);
+    void handleClearMatrixBitmapFeature(const uint8_t* buffer, size_t length);
+    void handleSetAnimFrameFeature(const uint8_t* buffer, size_t length);
+    void handleClearAnimFramesFeature(const uint8_t* buffer, size_t length);
+    /// Push the stored marquee text and bitmap into the light show at start-up.
+    void applyMatrixArt();
     void handleSetAutoOnFeature(const uint8_t* buffer, size_t length);
     
     // GPS Speed feature handlers
     void handleSetGPSLowSpeedFeature(const uint8_t* buffer, size_t length);
     void handleSetGPSTopSpeedFeature(const uint8_t* buffer, size_t length);
     void handleSetGPSLightshowSpeedEnabledFeature(const uint8_t* buffer, size_t length);
+    void handleSetSyncEnabledFeature(const uint8_t* buffer, size_t length);
+
+    // Sync apply path: a received group packet lands here (from serviceSync,
+    // main-loop context - never the radio callback).
+    void applySyncState(const BMSyncState& state);
     
     // Generic device configuration handlers
     void handleSetDeviceTypeFeature(const uint8_t* buffer, size_t length);

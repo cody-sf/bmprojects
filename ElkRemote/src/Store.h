@@ -12,6 +12,9 @@ bool storeLoadCal(float m[6]);
 void storeSaveCal(const float m[6]);
 void storeClearCal();
 
+bool storeLoadCycle(bool defaultOn);
+void storeSaveCycle(bool on);
+
 void storeLoadBars();
 void storeSaveBars();
 void storeForgetBars();

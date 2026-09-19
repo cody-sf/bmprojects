@@ -33,7 +33,7 @@ A unified device controller library for Burning Man LED projects. This library a
 #define NUM_LEDS 192
 CRGB leds[NUM_LEDS];
 
-BMDevice device("My-Device", "be03096f-9322-4360-bc84-0f977c5c3c10");
+BMDevice device("My-Device", "4746abe4-2135-4a84-8f2f-f47f3a73e73b");
 
 void setup() {
     device.addLEDStrip<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);

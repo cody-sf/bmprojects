@@ -17,6 +17,12 @@ void actColorBar(int idx, uint8_t r, uint8_t g, uint8_t b);
 void actMode(int modeIdx);
 void actPalette(int paletteIdx);
 
+// Toggle the palette cycle (persisted). The cycle runs from actTick
+// whenever a palette is selected: each bar walks the vivid track at its
+// own offset, so the group always spans the palette. The Speed slider
+// sets the pace.
+void actSetCycle(bool on);
+
 // Flash one bar white for a moment so you can tell which is which; the
 // restore happens in actTick.
 void actIdentify(int idx);

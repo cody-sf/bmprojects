@@ -77,6 +77,61 @@
 // down, then put the show back. Works even while the light is powered off.
 // At 0x70+ like every new common code, clear of the per-device tables.
 #define BLE_FEATURE_IDENTIFY 0x7E
+// Per-strip LED grouping: [0x7F][stripIndex][ledsPerPixel]. The index is the
+// order strips were registered with the show (what the "strips" status chunk
+// lists), so it works on sketch-configured rigs like the bike, not just
+// NVRAM-configured ones.
+#define BLE_FEATURE_SET_STRIP_GROUP 0x7F
+// Matrix display content (the bike's front-rack 8x32). Both persist in NVRAM
+// and survive reboots; devices without a matrix grid store them and simply
+// never show them (the display overlay needs a grid to engage).
+//   text:   [0x80][ASCII], truncated to MARQUEE_TEXT_MAX - what the marquee scrolls
+//   bitmap: [0x81][w][h][MATRIX_BITMAP_COLORS * RGB][ceil(w*h/2) packed 4bpp
+//           pixels, high nibble first, row-major from the TOP row] - one write
+//           (179 bytes for 32x8)
+//   clear:  [0x82]
+#define BLE_FEATURE_SET_MARQUEE_TEXT 0x80
+#define BLE_FEATURE_SET_MATRIX_BITMAP 0x81
+#define BLE_FEATURE_CLEAR_MATRIX_BITMAP 0x82
+// Wiring diagnostic: paint every strip as a rainbow along the raw LED chain
+// (hue = chain index) for 30 s, bypassing maps, render orders and grids. One
+// photo of the matrix identifies how the chain actually snakes - the layouts
+// and their tells are documented in scripts/generate_matrix_map.py.
+#define BLE_FEATURE_MATRIX_TEST 0x83
+// Text rendering style for the matrix display: [0x84][style] (int32 LE from
+// the app; the first payload byte is the value). 0 normal, 1 bold. Persisted.
+#define BLE_FEATURE_SET_TEXT_STYLE 0x84
+// What the marquee glyphs are filled with: [0x85][fill]. 0 the sliding palette
+// gradient, 1 fire, 2 rain, 3 plasma. Applies to the marquee and word zoom.
+// Persisted.
+#define BLE_FEATURE_SET_TEXT_FILL 0x85
+// Animation frames for the display's animation mode. Each frame is the bitmap
+// format behind a slot index; the phone clears first, then uploads frames
+// 0..N-1, because playback runs the contiguous run of set slots from 0.
+//   frame: [0x86][slot][w][h][MATRIX_BITMAP_COLORS * RGB][packed 4bpp pixels]
+//   clear: [0x87]
+#define BLE_FEATURE_SET_ANIM_FRAME 0x86
+#define BLE_FEATURE_CLEAR_ANIM_FRAMES 0x87
+// Per-strip brightness ceiling: [0x88][stripIndex][max 1-255], indexed like
+// 0x7F by registration order. The strand's output is the master brightness
+// scaled by max/255 - dim accents next to bright strips, or a strand held
+// under the level where it starts to glitch - and the whole rig still dims
+// together on the one master slider. Persisted; 255 = uncapped.
+#define BLE_FEATURE_SET_STRIP_BRIGHTNESS 0x88
+// What the matrix display overlay shows: [0x89][mode] (int32 LE from the app;
+// the first payload byte is the value). 0 off (the running effect owns the
+// panel again), 1 marquee text, 2 word zoom, 3 the stored bitmap, 4 the
+// stored animation. The display is NOT an effect: it owns only the grid
+// strip(s) and the rest of the rig keeps playing the selected effect, so
+// neither the mode list, the palette, nor group sync are touched by it.
+// Persisted; reported in the matrix chunk as `disp`.
+#define BLE_FEATURE_SET_MATRIX_DISPLAY 0x89
+// The display's own pace in ms: [0x8A][ms int32 LE]. Exactly ms per animation
+// frame (the app sends a GIF's native frame time so its rhythm survives);
+// marquee scroll and word zoom scale off the same value, 100 = the old speed
+// knob's midpoint feel. Clamped to 20-2000. Persisted; reported as `mtxMs`.
+// The effect speed knob no longer paces the display at all.
+#define BLE_FEATURE_SET_MATRIX_SPEED 0x8A
 // The name a person gives this device. Persisted, reported in status, and
 // folded into the advertised name so both apps can read it without a pairing
 // list of their own.

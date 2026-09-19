@@ -77,6 +77,14 @@ struct CustomPalette {
 #define PREF_SYNC_ENABLED "syncEnabled"
 // One key per custom palette slot: "cpal0" ... "cpal3".
 #define PREF_CUSTOM_PALETTE_PREFIX "cpal"
+#define PREF_MARQUEE_TEXT "marquee"
+#define PREF_MATRIX_BITMAP "matrixBmp"
+#define PREF_TEXT_STYLE "textStyle"
+#define PREF_TEXT_FILL "textFill"
+#define PREF_MATRIX_DISPLAY "matrixDisp"
+#define PREF_MATRIX_SPEED "matrixMs"
+// Animation frame blobs live under "animF0".."animF7".
+#define PREF_ANIM_FRAME_PREFIX "animF"
 
 struct DeviceDefaults {
     // Core settings
@@ -180,6 +188,17 @@ public:
     
     // LED strip configuration
     bool setLEDStripConfig(int stripIndex, int pin, int numLeds, int colorOrder, bool enabled);
+    
+    // Per-strip LED grouping, keyed by the order strips were *registered with
+    // the show* (sketch-added and NVRAM-configured alike) - not by the config
+    // rows above, which static targets like the bike never populate. 1 =
+    // normal density, 6 = a 12 V glow strip ganging six LEDs per pixel.
+    int getStripGroupSize(int stripIndex);
+    bool setStripGroupSize(int stripIndex, int groupSize);
+    // Per-strip brightness ceiling, keyed the same way. 255 = uncapped; the
+    // show scales that strand's output by max/255 of the master brightness.
+    int getStripMaxBrightness(int stripIndex);
+    bool setStripMaxBrightness(int stripIndex, int maxBrightness);
     bool setActiveLEDStrips(int count);
     LEDStripConfig getLEDStripConfig(int stripIndex);
     int getActiveLEDStrips();
@@ -207,6 +226,33 @@ public:
     bool clearCustomPalette(int slot);
     /// Null for an out-of-range slot; check `used` for an empty one.
     const CustomPalette* getCustomPalette(int slot) const;
+
+    // Matrix display content, off DeviceDefaults for the same copied-by-value
+    // reason as the palettes. The bitmap blob is opaque here:
+    // [w][h][16*RGB][packed 4bpp pixels], exactly the BLE payload after the
+    // feature byte. Setters write through to NVRAM immediately.
+    bool setMarqueeText(const String& text);
+    String getMarqueeText() const { return marqueeText_; }
+    bool setTextStyle(uint8_t style);
+    uint8_t getTextStyle() const { return textStyle_; }
+    bool setTextFill(uint8_t fill);
+    uint8_t getTextFill() const { return textFill_; }
+    // What the display overlay shows (MATRIX_DISPLAY_*) and its own pace in
+    // ms - the effect speed knob no longer touches the display.
+    bool setMatrixDisplay(uint8_t mode);
+    uint8_t getMatrixDisplay() const { return matrixDisplay_; }
+    bool setMatrixSpeed(uint16_t ms);
+    uint16_t getMatrixSpeed() const { return matrixSpeedMs_; }
+    bool setMatrixBitmap(const uint8_t* blob, size_t length);
+    bool clearMatrixBitmap();
+    /// Bytes copied into `blob` (up to maxLength), 0 when nothing is stored.
+    size_t getMatrixBitmap(uint8_t* blob, size_t maxLength) const;
+
+    // Animation frames, one blob per slot in the same opaque bitmap format.
+    bool setAnimFrame(uint8_t index, const uint8_t* blob, size_t length);
+    bool clearAnimFrames();
+    /// Bytes copied into `blob` for slot `index`, 0 when the slot is empty.
+    size_t getAnimFrame(uint8_t index, uint8_t* blob, size_t maxLength) const;
     
     // Get current defaults
     DeviceDefaults getCurrentDefaults();
@@ -229,6 +275,11 @@ private:
     Preferences preferences_;
     DeviceDefaults currentDefaults_;
     CustomPalette customPalettes_[CUSTOM_PALETTE_COUNT];
+    String marqueeText_;
+    uint8_t textStyle_ = 0;
+    uint8_t textFill_ = 0;
+    uint8_t matrixDisplay_ = 0;
+    uint16_t matrixSpeedMs_ = 100;
     bool initialized_;
     
     // Helper methods

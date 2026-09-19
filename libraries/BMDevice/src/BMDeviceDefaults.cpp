@@ -20,6 +20,11 @@ bool BMDeviceDefaults::begin() {
         initialized_ = true;
         migrateIfNeeded();
         loadCustomPalettes();
+        marqueeText_ = readString(PREF_MARQUEE_TEXT, "HELLO PLAYA");
+        textStyle_ = (uint8_t)preferences_.getUChar(PREF_TEXT_STYLE, 0);
+        textFill_ = (uint8_t)preferences_.getUChar(PREF_TEXT_FILL, 0);
+        matrixDisplay_ = (uint8_t)preferences_.getUChar(PREF_MATRIX_DISPLAY, MATRIX_DISPLAY_OFF);
+        matrixSpeedMs_ = (uint16_t)preferences_.getUShort(PREF_MATRIX_SPEED, MATRIX_SPEED_DEFAULT_MS);
         
         // Load current defaults from storage
         DeviceDefaults defaults;
@@ -341,6 +346,46 @@ bool BMDeviceDefaults::setLEDStripConfig(int stripIndex, int pin, int numLeds, i
     return saveDefaults(currentDefaults_);
 }
 
+#define PREF_STRIP_GROUPS "stripGroups"
+
+int BMDeviceDefaults::getStripGroupSize(int stripIndex) {
+    if (stripIndex < 0 || stripIndex >= MAX_LED_STRIPS) return 1;
+    uint8_t groups[MAX_LED_STRIPS];
+    memset(groups, 1, sizeof(groups));
+    preferences_.getBytes(PREF_STRIP_GROUPS, groups, sizeof(groups));
+    return groups[stripIndex] < 1 ? 1 : groups[stripIndex];
+}
+
+bool BMDeviceDefaults::setStripGroupSize(int stripIndex, int groupSize) {
+    if (stripIndex < 0 || stripIndex >= MAX_LED_STRIPS) return false;
+    uint8_t groups[MAX_LED_STRIPS];
+    memset(groups, 1, sizeof(groups));
+    preferences_.getBytes(PREF_STRIP_GROUPS, groups, sizeof(groups));
+    groups[stripIndex] = (uint8_t)constrain(groupSize, 1, 12);
+    return preferences_.putBytes(PREF_STRIP_GROUPS, groups, sizeof(groups)) == sizeof(groups);
+}
+
+#define PREF_STRIP_BRI "stripBri"
+
+int BMDeviceDefaults::getStripMaxBrightness(int stripIndex) {
+    if (stripIndex < 0 || stripIndex >= MAX_LED_STRIPS) return 255;
+    uint8_t caps[MAX_LED_STRIPS];
+    memset(caps, 255, sizeof(caps));
+    preferences_.getBytes(PREF_STRIP_BRI, caps, sizeof(caps));
+    // 0 never persists (setStripMaxBrightness floors at 1); read it as
+    // uncapped so a stale blob can't black a strand out.
+    return caps[stripIndex] < 1 ? 255 : caps[stripIndex];
+}
+
+bool BMDeviceDefaults::setStripMaxBrightness(int stripIndex, int maxBrightness) {
+    if (stripIndex < 0 || stripIndex >= MAX_LED_STRIPS) return false;
+    uint8_t caps[MAX_LED_STRIPS];
+    memset(caps, 255, sizeof(caps));
+    preferences_.getBytes(PREF_STRIP_BRI, caps, sizeof(caps));
+    caps[stripIndex] = (uint8_t)constrain(maxBrightness, 1, 255);
+    return preferences_.putBytes(PREF_STRIP_BRI, caps, sizeof(caps)) == sizeof(caps);
+}
+
 bool BMDeviceDefaults::setActiveLEDStrips(int count) {
     if (count > MAX_LED_STRIPS || count < 0) return false;
     
@@ -401,6 +446,113 @@ const CustomPalette* BMDeviceDefaults::getCustomPalette(int slot) const {
         return nullptr;
     }
     return &customPalettes_[slot];
+}
+
+bool BMDeviceDefaults::setMarqueeText(const String& text) {
+    if (!initialized_) {
+        return false;
+    }
+    marqueeText_ = text.substring(0, MARQUEE_TEXT_MAX);
+    return writeString(PREF_MARQUEE_TEXT, marqueeText_);
+}
+
+bool BMDeviceDefaults::setTextStyle(uint8_t style) {
+    if (!initialized_) {
+        return false;
+    }
+    textStyle_ = style ? 1 : 0;
+    return preferences_.putUChar(PREF_TEXT_STYLE, textStyle_) == 1;
+}
+
+bool BMDeviceDefaults::setTextFill(uint8_t fill) {
+    if (!initialized_) {
+        return false;
+    }
+    textFill_ = fill < 4 ? fill : 0;
+    return preferences_.putUChar(PREF_TEXT_FILL, textFill_) == 1;
+}
+
+bool BMDeviceDefaults::setMatrixDisplay(uint8_t mode) {
+    if (!initialized_) {
+        return false;
+    }
+    matrixDisplay_ = mode <= MATRIX_DISPLAY_MAX ? mode : (uint8_t)MATRIX_DISPLAY_OFF;
+    return preferences_.putUChar(PREF_MATRIX_DISPLAY, matrixDisplay_) == 1;
+}
+
+bool BMDeviceDefaults::setMatrixSpeed(uint16_t ms) {
+    if (!initialized_) {
+        return false;
+    }
+    if (ms < MATRIX_SPEED_MIN_MS) ms = MATRIX_SPEED_MIN_MS;
+    if (ms > MATRIX_SPEED_MAX_MS) ms = MATRIX_SPEED_MAX_MS;
+    matrixSpeedMs_ = ms;
+    return preferences_.putUShort(PREF_MATRIX_SPEED, matrixSpeedMs_) == 2;
+}
+
+static String animFrameKey(uint8_t index) {
+    return String(PREF_ANIM_FRAME_PREFIX) + String((int)index);
+}
+
+bool BMDeviceDefaults::setAnimFrame(uint8_t index, const uint8_t* blob, size_t length) {
+    if (!initialized_ || blob == nullptr || length == 0 || index >= MATRIX_ANIM_MAX_FRAMES) {
+        return false;
+    }
+    return preferences_.putBytes(animFrameKey(index).c_str(), blob, length) == length;
+}
+
+bool BMDeviceDefaults::clearAnimFrames() {
+    if (!initialized_) {
+        return false;
+    }
+    // remove() reports false for slots never written; that is not a failure.
+    for (uint8_t i = 0; i < MATRIX_ANIM_MAX_FRAMES; i++) {
+        preferences_.remove(animFrameKey(i).c_str());
+    }
+    return true;
+}
+
+size_t BMDeviceDefaults::getAnimFrame(uint8_t index, uint8_t* blob, size_t maxLength) const {
+    if (!initialized_ || blob == nullptr || index >= MATRIX_ANIM_MAX_FRAMES) {
+        return 0;
+    }
+    Preferences& prefs = const_cast<Preferences&>(preferences_);
+    String key = animFrameKey(index);
+    size_t stored = prefs.getBytesLength(key.c_str());
+    if (stored == 0 || stored > maxLength) {
+        return 0;
+    }
+    return prefs.getBytes(key.c_str(), blob, stored);
+}
+
+bool BMDeviceDefaults::setMatrixBitmap(const uint8_t* blob, size_t length) {
+    if (!initialized_ || blob == nullptr || length == 0) {
+        return false;
+    }
+    return preferences_.putBytes(PREF_MATRIX_BITMAP, blob, length) == length;
+}
+
+bool BMDeviceDefaults::clearMatrixBitmap() {
+    if (!initialized_) {
+        return false;
+    }
+    // remove() reports false for a key that was never written, which is not a
+    // failure - there is no bitmap either way.
+    preferences_.remove(PREF_MATRIX_BITMAP);
+    return true;
+}
+
+size_t BMDeviceDefaults::getMatrixBitmap(uint8_t* blob, size_t maxLength) const {
+    if (!initialized_ || blob == nullptr) {
+        return 0;
+    }
+    // Preferences reads are const in effect but the API is not marked so.
+    Preferences& prefs = const_cast<Preferences&>(preferences_);
+    size_t stored = prefs.getBytesLength(PREF_MATRIX_BITMAP);
+    if (stored == 0 || stored > maxLength) {
+        return 0;
+    }
+    return prefs.getBytes(PREF_MATRIX_BITMAP, blob, stored);
 }
 
 /// A slot with no key, or one whose blob is the wrong size for this firmware's
@@ -504,9 +656,11 @@ bool BMDeviceDefaults::validateDefaults(const DeviceDefaults& defaults) {
     if (defaults.statusUpdateInterval < 1000 || defaults.statusUpdateInterval > 60000) return false;
     if (defaults.version < 1) return false;
     
-    // Check enum values are valid
+    // Check enum values are valid. The ceilings must be the true enum tails:
+    // this used to stop at spiral_galaxy, so saving defaults while playing any
+    // later effect failed - silently, from the app's point of view.
     if ((uint8_t)defaults.palette > (uint8_t)AvailablePalettes::custom4) return false;
-    if ((uint8_t)defaults.effect > (uint8_t)LightSceneID::spiral_galaxy) return false;
+    if ((uint8_t)defaults.effect > (uint8_t)LIGHT_SCENE_ID_MAX) return false;
     
     return true;
 }

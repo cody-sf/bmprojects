@@ -4,6 +4,7 @@
 #include "ElkLink.h"
 #include "Gradient.h"
 #include "Palettes.h"
+#include "Store.h"
 #include <Arduino.h>
 #include <string.h>
 
@@ -116,6 +117,16 @@ static int sortedConnected(int* out) {
   return n;
 }
 
+// --- palette deal + cycle ---
+// One shared vivid track: rebuilt on every palette pick, walked by the
+// cycle. Everything a bar is told to show comes off this track, so the deal
+// and the cycle can never disagree about what a palette looks like.
+
+static RGB8 cycleTrack[VIVID_TRACK_MAX];
+static int cycleTrackLen = 0;
+static float cyclePhase = 0.0f;
+static uint32_t lastCycleMs = 0;
+
 void actPalette(int paletteIdx) {
   if (paletteIdx < 0 || paletteIdx >= PALETTE_COUNT) return;
   int order[MAX_BARS];
@@ -123,12 +134,27 @@ void actPalette(int paletteIdx) {
   if (!n) return;
   app.selectedPalette = paletteIdx;
   app.selectedMode = -1;
-  RGB8 spread[MAX_BARS];
-  spreadPalette(PALETTES[paletteIdx], n, spread);
+  cycleTrackLen = buildVividTrack(PALETTES[paletteIdx], cycleTrack);
+  cyclePhase = 0.0f;
+  lastCycleMs = millis();
   for (int i = 0; i < n; i++) {
+    // Cycling sweeps every colour past every bar anyway, so exact offsets
+    // are right; a static deal to a small group keeps the app's jitter so a
+    // re-tap reshuffles instead of always landing the same colours.
+    float pos = static_cast<float>(i) / n;
+    if (!app.cycleEnabled && n <= 3) {
+      pos += static_cast<float>(random(1000)) / (1000.0f * n);
+    }
+    RGB8 c = trackColorAt(cycleTrack, cycleTrackLen, pos);
     ensureOn(order[i]);
-    sendColor(order[i], spread[i].r, spread[i].g, spread[i].b);
+    sendColor(order[i], c.r, c.g, c.b);
   }
+}
+
+void actSetCycle(bool on) {
+  app.cycleEnabled = on;
+  storeSaveCycle(on);
+  lastCycleMs = millis();
 }
 
 // --- identify blink ---
@@ -153,7 +179,7 @@ void actIdentify(int idx) {
   blinkRestoreAt = millis() + 900;
 }
 
-void actTick() {
+static void blinkTick() {
   if (blinkIdx < 0 || millis() < blinkRestoreAt) return;
   int idx = blinkIdx;
   blinkIdx = -1;
@@ -172,4 +198,42 @@ void actTick() {
   bar.r = blinkPrevR;
   bar.g = blinkPrevG;
   bar.b = blinkPrevB;
+}
+
+/**
+ * The gentle cycle. Every 200ms each bar gets the track colour at
+ * (phase + its offset); a step at these speeds moves a channel a couple of
+ * counts, which the eye reads as a crossfade. Colours that haven't changed
+ * since the last send are skipped, so slow settings stay quiet on the radio.
+ */
+static void cycleTick() {
+  uint32_t now = millis();
+  if (!app.cycleEnabled || app.selectedPalette < 0 || cycleTrackLen < 2) {
+    lastCycleMs = now;  // no dt cliff when the cycle switches back on
+    return;
+  }
+  if (now - lastCycleMs < 200) return;
+  float dt = (now - lastCycleMs) / 1000.0f;
+  lastCycleMs = now;
+
+  // Speed 0 -> a full lap in ~3 minutes, 100 -> ~8 seconds.
+  float period = 180.0f - app.speed * 1.72f;
+  cyclePhase += dt / period;
+  cyclePhase -= floorf(cyclePhase);
+
+  int order[MAX_BARS];
+  int n = sortedConnected(order);
+  for (int i = 0; i < n; i++) {
+    Bar& bar = app.bars[order[i]];
+    if (!bar.power || order[i] == blinkIdx) continue;
+    RGB8 c = trackColorAt(cycleTrack, cycleTrackLen, cyclePhase + static_cast<float>(i) / n);
+    if (c.r != bar.r || c.g != bar.g || c.b != bar.b) {
+      sendColor(order[i], c.r, c.g, c.b);
+    }
+  }
+}
+
+void actTick() {
+  blinkTick();
+  cycleTick();
 }

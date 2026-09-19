@@ -30,6 +30,13 @@ If you bought the 2-USB (ST7789) variant instead, swap the driver flags in
 - **Home** - group power, brightness, mode speed, solid color.
 - **Palettes** - the app's palette catalog; a tap deals one sampled color
   per connected bar (jittered for 3 or fewer, even spread otherwise).
+  Colors are drawn from the palette's *vivid track*: the gradient sampled
+  densely with dark stretches dropped and dim colors boosted, because a
+  black band that reads as texture on a 450-LED strip reads as a dead
+  fixture on a light bar. The **Cycle** chip (on by default, persisted)
+  slowly walks every bar along the track - small color steps every 200 ms
+  that read as a crossfade - paced by the Speed slider (~3 min per lap at
+  0, ~8 s at 100).
 - **Modes** - the bars' built-in animations (`ELK_MODES`).
 - **Bars** - per-bar power/color, `ID` flashes a bar white so you can tell
   which is which, tap a name to rename it (stored on the CYD; the bars

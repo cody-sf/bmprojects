@@ -11,9 +11,7 @@ struct BMProfile: Identifiable, Hashable {
     let label: String
     let service: CBUUID
     let features: CBUUID
-    /// Nil for families whose firmware has no status characteristic (the bike),
-    /// where we can write but never read state back.
-    let status: CBUUID?
+    let status: CBUUID
 
     static let bmDevice = BMProfile(
         id: "BMDevice",
@@ -21,14 +19,6 @@ struct BMProfile: Identifiable, Hashable {
         service: CBUUID(string: "4746ABE4-2135-4A84-8F2F-F47F3A73E73B"),
         features: CBUUID(string: "3927E9DB-012B-4DB9-8890-984FE28FAF83"),
         status: CBUUID(string: "C054C450-CF93-4E6F-848E-2C521E739F4B")
-    )
-
-    static let backpack = BMProfile(
-        id: "backpack",
-        label: "Backpack",
-        service: CBUUID(string: "BE03096F-9322-4360-BC84-0F977C5C3C10"),
-        features: CBUUID(string: "24DCB43C-D457-4DE0-A968-9CDC9D60392C"),
-        status: CBUUID(string: "71A0CB09-7998-4774-83B5-1A5F02F205FB")
     )
 
     static let umbrella = BMProfile(
@@ -39,15 +29,7 @@ struct BMProfile: Identifiable, Hashable {
         status: CBUUID(string: "0B95CC9E-288E-49D2-A2AA-7230ED489EC8")
     )
 
-    static let bike = BMProfile(
-        id: "bike",
-        label: "Bike",
-        service: CBUUID(string: "E75D21D2-2482-4BA2-BED5-C59BC8D7AA2C"),
-        features: CBUUID(string: "E2D56095-0DA0-45F3-9494-2369305334C1"),
-        status: nil
-    )
-
-    static let all: [BMProfile] = [.bmDevice, .backpack, .umbrella, .bike]
+    static let all: [BMProfile] = [.bmDevice, .umbrella]
 
     static let allServices: [CBUUID] = all.map(\.service)
 
